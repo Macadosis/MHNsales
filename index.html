@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MHN Sales</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="brand">
+      <img src="logo.png" alt="MHN logo" class="brand-logo" />
+      <span class="brand-name">MHN Sales</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" role="tab" aria-selected="true" data-tab="board">Board</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="pipeline">Pipeline</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="dashboard">Dashboard</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="history">History</button>
+    </nav>
+    <button class="btn btn-primary" id="newDealBtn">New deal</button>
+  </header>
+
+  <main>
+    <section id="view-board" class="view">
+      <div class="board-toolbar" id="boardToolbar">
+        <div class="filters" id="filters"></div>
+        <div class="search-bubble" id="searchBubble">
+          <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+            <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <input type="search" id="searchInput" class="search-input" placeholder="Search deals" aria-label="Search deals by name" autocomplete="off" />
+          <button type="button" class="search-clear" id="searchClearBtn" aria-label="Clear search" hidden>&times;</button>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="clearFiltersBtn" hidden>Clear filters</button>
+      </div>
+      <div class="board" id="board">
+        <!-- Columns rendered by JS -->
+      </div>
+    </section>
+
+    <section id="view-pipeline" class="view" hidden>
+      <div class="pipeline-toolbar" id="pipelineToolbar">
+        <div class="filters" id="pipelineFilters"></div>
+        <button class="btn btn-ghost btn-sm" id="pipelineClearFiltersBtn" hidden>Clear filters</button>
+        <div class="pipeline-period">
+          <button type="button" class="period-nav" id="pipelinePrevBtn" aria-label="Previous period">‹</button>
+          <span class="period-label" id="pipelinePeriodLabel"></span>
+          <button type="button" class="period-nav" id="pipelineNextBtn" aria-label="Next period">›</button>
+          <select class="period-select" id="pipelinePeriodLength" aria-label="Period length">
+            <option value="3">3 months</option>
+            <option value="4" selected>4 months</option>
+            <option value="6">6 months</option>
+            <option value="12">12 months</option>
+          </select>
+        </div>
+      </div>
+      <div class="pipeline-chart" id="pipelineChart">
+        <div class="pipeline-axis" id="pipelineAxis"></div>
+        <div class="pipeline-body" id="pipelineBody">
+          <div class="pipeline-rows" id="pipelineRows"></div>
+        </div>
+      </div>
+    </section>
+    <section id="view-dashboard" class="view placeholder-view" hidden>
+      <h2 class="placeholder-title">Dashboard</h2>
+      <p class="placeholder-text">This view is coming soon.</p>
+    </section>
+    <section id="view-history" class="view" hidden>
+      <div class="history-header">
+        <h2 class="history-title">History</h2>
+        <p class="history-lead">Dismissed deals are kept here so you don’t pursue the same company again.</p>
+        <label class="history-search">
+          <span class="visually-hidden">Search dismissed deals</span>
+          <input
+            type="search"
+            id="historySearchInput"
+            placeholder="Search by company name…"
+            autocomplete="off"
+          />
+        </label>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </section>
+  </main>
+
+  <!-- Card create / edit modal -->
+  <div class="modal-overlay" id="modalOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-header">
+        <h2 id="modalTitle">New deal</h2>
+        <button class="icon-btn" id="modalCloseBtn" aria-label="Close">&times;</button>
+      </div>
+      <form id="dealForm" autocomplete="off">
+        <div class="modal-tabs" role="tablist" aria-label="Deal sections">
+          <button
+            type="button"
+            class="modal-tab is-active"
+            role="tab"
+            id="dealTabDetails"
+            aria-selected="true"
+            aria-controls="modalPanelDetails"
+            data-modal-tab="details"
+          >
+            Company details
+          </button>
+          <button
+            type="button"
+            class="modal-tab"
+            role="tab"
+            id="dealTabActivity"
+            aria-selected="false"
+            aria-controls="modalPanelActivity"
+            data-modal-tab="activity"
+          >
+            Activity Log
+          </button>
+        </div>
+
+        <div
+          class="modal-panel"
+          id="modalPanelDetails"
+          role="tabpanel"
+          aria-labelledby="dealTabDetails"
+        >
+          <div class="form-grid">
+            <label class="field span-2">
+              <span class="field-label">Company name</span>
+              <div class="combobox">
+                <input
+                  type="text"
+                  name="company"
+                  required
+                  placeholder="Acme GmbH"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="companySuggestions"
+                />
+                <ul class="combobox-suggestions" id="companySuggestions" role="listbox" hidden></ul>
+              </div>
+            </label>
+            <label class="field">
+              <span class="field-label">Contact name</span>
+              <input type="text" name="contact" placeholder="Jane Doe" />
+            </label>
+            <label class="field">
+              <span class="field-label">Phone</span>
+              <input type="tel" name="phone" placeholder="+49 170 000 0000" />
+            </label>
+            <label class="field span-2">
+              <span class="field-label">Email</span>
+              <input type="email" name="email" placeholder="jane@acme.com" />
+            </label>
+            <label class="field">
+              <span class="field-label">Industry</span>
+              <div class="combobox">
+                <input
+                  type="text"
+                  name="industry"
+                  placeholder="Manufacturing"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="industrySuggestions"
+                />
+                <ul class="combobox-suggestions" id="industrySuggestions" role="listbox" hidden></ul>
+              </div>
+            </label>
+            <label class="field">
+              <span class="field-label">Tool</span>
+              <div class="combobox">
+                <input
+                  type="text"
+                  name="tool"
+                  placeholder="Product / service"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="toolSuggestions"
+                />
+                <ul class="combobox-suggestions" id="toolSuggestions" role="listbox" hidden></ul>
+              </div>
+            </label>
+            <label class="field">
+              <span class="field-label">Sales value (€)</span>
+              <input type="number" name="value" min="0" step="100" value="10000" required />
+            </label>
+            <label class="field">
+              <span class="field-label">Owner</span>
+              <div class="combobox">
+                <input
+                  type="text"
+                  name="owner"
+                  placeholder="Deal owner"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="ownerSuggestions"
+                />
+                <ul class="combobox-suggestions" id="ownerSuggestions" role="listbox" hidden></ul>
+              </div>
+            </label>
+            <div class="implementation-fields span-2" id="implementationFields" hidden>
+              <span class="field-label">Implementation</span>
+              <div class="implementation-grid">
+                <label class="field">
+                  <span class="field-sublabel">Start date</span>
+                  <input type="date" name="implementationStart" />
+                </label>
+                <label class="field">
+                  <span class="field-sublabel">Duration</span>
+                  <div class="input-with-suffix">
+                    <input type="number" name="implementationDuration" min="1" step="1" placeholder="e.g. 90" />
+                    <span class="input-suffix" aria-hidden="true">days</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="modal-panel"
+          id="modalPanelActivity"
+          role="tabpanel"
+          aria-labelledby="dealTabActivity"
+          hidden
+        >
+          <div class="activity-log">
+            <div class="activity-notes" id="activityNotes"></div>
+            <div class="activity-composer">
+              <label class="field">
+                <span class="field-label">New note</span>
+                <textarea
+                  id="newNoteInput"
+                  class="note-textarea"
+                  rows="3"
+                  placeholder="Write a note about this deal…"
+                ></textarea>
+              </label>
+              <div class="activity-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="addNoteBtn">Add note</button>
+                <a
+                  class="obsidian-link btn-sm"
+                  href="https://obsidian.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open Obsidian"
+                  aria-label="Open Obsidian website"
+                >
+                  <img src="obsidian.png" alt="" class="obsidian-icon" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-danger" id="dismissDealBtn" hidden>Dismiss</button>
+          <div class="modal-actions-right">
+            <button type="button" class="btn btn-ghost" id="cancelBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="saveBtn">Create deal</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dismiss deal confirmation -->
+  <div class="modal-overlay" id="dismissOverlay" hidden>
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="dismissTitle">
+      <div class="modal-header">
+        <h2 id="dismissTitle">Dismiss deal</h2>
+        <button class="icon-btn" id="dismissCloseBtn" aria-label="Close">&times;</button>
+      </div>
+      <p class="modal-lead" id="dismissLead">
+        Are you sure you want to dismiss this deal?
+      </p>
+      <div class="modal-actions modal-actions-stack">
+        <div class="modal-actions-right">
+          <button type="button" class="btn btn-ghost" id="dismissCancelBtn">No, go back</button>
+          <button type="button" class="btn btn-primary" id="dismissConfirmBtn">Yes, dismiss</button>
+        </div>
+        <button type="button" class="btn-text-danger" id="deleteForeverBtn">
+          Completely delete this deal
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Commit deal: implementation timeframe -->
+  <div class="modal-overlay" id="commitOverlay" hidden>
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="commitTitle">
+      <div class="modal-header">
+        <h2 id="commitTitle">Commit deal</h2>
+        <button class="icon-btn" id="commitCloseBtn" aria-label="Close">&times;</button>
+      </div>
+      <p class="modal-lead">Set the implementation schedule for <strong id="commitDealName"></strong>.</p>
+      <form id="commitForm" autocomplete="off">
+        <div class="implementation-fields">
+          <span class="field-label">Implementation</span>
+          <div class="implementation-grid">
+            <label class="field">
+              <span class="field-sublabel">Start date</span>
+              <input type="date" name="startDate" required />
+            </label>
+            <label class="field">
+              <span class="field-sublabel">Duration</span>
+              <div class="input-with-suffix">
+                <input type="number" name="days" min="1" step="1" placeholder="e.g. 90" required />
+                <span class="input-suffix" aria-hidden="true">days</span>
+              </div>
+            </label>
+          </div>
+          <span class="field-hint">Enter the expected duration in days</span>
+        </div>
+        <div class="modal-actions">
+          <div class="modal-actions-right">
+            <button type="button" class="btn btn-ghost" id="commitCancelBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary">Commit deal</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="db.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
