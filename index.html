@@ -30,13 +30,46 @@
         </button>
       </div>
 
-      <form id="loginForm" autocomplete="on">
-        <label class="field" id="loginNameField" hidden>
+      <!-- Separate forms so browsers treat login vs signup correctly for password save/autofill -->
+      <form id="loginForm" class="auth-form" method="post" action="#" autocomplete="on">
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input
+            type="email"
+            name="username"
+            id="loginEmailInput"
+            required
+            placeholder="you@company.com"
+            autocomplete="username"
+            inputmode="email"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input
+            type="password"
+            name="password"
+            id="loginPasswordInput"
+            required
+            placeholder="Your password"
+            autocomplete="current-password"
+          />
+        </label>
+        <p class="auth-error" id="loginAuthError" hidden role="alert"></p>
+        <button type="submit" class="btn btn-primary login-submit" id="loginSubmitBtn">Log in</button>
+      </form>
+
+      <form id="signupForm" class="auth-form" method="post" action="#" autocomplete="on" hidden>
+        <label class="field">
           <span class="field-label">Your name</span>
           <input
             type="text"
-            name="displayName"
-            id="loginNameInput"
+            name="name"
+            id="signupNameInput"
+            required
             maxlength="80"
             placeholder="e.g. Alex Müller"
             autocomplete="name"
@@ -47,38 +80,43 @@
           <input
             type="email"
             name="email"
-            id="loginEmailInput"
+            id="signupEmailInput"
             required
             placeholder="you@company.com"
-            autocomplete="email"
+            autocomplete="username"
+            inputmode="email"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
           />
         </label>
         <label class="field">
           <span class="field-label">Password</span>
           <input
             type="password"
-            name="password"
-            id="loginPasswordInput"
+            name="new-password"
+            id="signupPasswordInput"
             required
             minlength="6"
             placeholder="At least 6 characters"
-            autocomplete="current-password"
+            autocomplete="new-password"
           />
         </label>
-        <label class="field" id="loginConfirmField" hidden>
+        <label class="field">
           <span class="field-label">Confirm password</span>
           <input
             type="password"
-            name="confirmPassword"
-            id="loginConfirmInput"
+            name="confirm-password"
+            id="signupConfirmInput"
+            required
             minlength="6"
             placeholder="Repeat password"
             autocomplete="new-password"
           />
         </label>
-        <p class="auth-error" id="authError" hidden role="alert"></p>
-        <p class="auth-success" id="authSuccess" hidden role="status"></p>
-        <button type="submit" class="btn btn-primary login-submit" id="authSubmitBtn">Log in</button>
+        <p class="auth-error" id="signupAuthError" hidden role="alert"></p>
+        <p class="auth-success" id="signupAuthSuccess" hidden role="status"></p>
+        <button type="submit" class="btn btn-primary login-submit" id="signupSubmitBtn">Create account</button>
       </form>
     </div>
   </div>

@@ -92,16 +92,19 @@ const fmtEuro = new Intl.NumberFormat("de-DE", {
 
 const loginScreen = document.getElementById("loginScreen");
 const loginForm = document.getElementById("loginForm");
-const loginNameField = document.getElementById("loginNameField");
-const loginNameInput = document.getElementById("loginNameInput");
+const signupForm = document.getElementById("signupForm");
 const loginEmailInput = document.getElementById("loginEmailInput");
 const loginPasswordInput = document.getElementById("loginPasswordInput");
-const loginConfirmField = document.getElementById("loginConfirmField");
-const loginConfirmInput = document.getElementById("loginConfirmInput");
+const signupNameInput = document.getElementById("signupNameInput");
+const signupEmailInput = document.getElementById("signupEmailInput");
+const signupPasswordInput = document.getElementById("signupPasswordInput");
+const signupConfirmInput = document.getElementById("signupConfirmInput");
 const loginLead = document.getElementById("loginLead");
-const authErrorEl = document.getElementById("authError");
-const authSuccessEl = document.getElementById("authSuccess");
-const authSubmitBtn = document.getElementById("authSubmitBtn");
+const loginAuthError = document.getElementById("loginAuthError");
+const signupAuthError = document.getElementById("signupAuthError");
+const signupAuthSuccess = document.getElementById("signupAuthSuccess");
+const loginSubmitBtn = document.getElementById("loginSubmitBtn");
+const signupSubmitBtn = document.getElementById("signupSubmitBtn");
 const authModeLoginBtn = document.getElementById("authModeLogin");
 const authModeSignupBtn = document.getElementById("authModeSignup");
 const appShell = document.getElementById("appShell");
@@ -117,18 +120,25 @@ function getCurrentUserName() {
 }
 
 function setAuthMessage({ error = "", success = "" } = {}) {
-  authErrorEl.textContent = error;
-  authErrorEl.hidden = !error;
-  authSuccessEl.textContent = success;
-  authSuccessEl.hidden = !success;
+  loginAuthError.classList.remove("is-info");
+  loginAuthError.textContent = error;
+  loginAuthError.hidden = !error || authMode !== "login";
+  signupAuthError.textContent = error;
+  signupAuthError.hidden = !error || authMode !== "signup";
+  signupAuthSuccess.textContent = success;
+  signupAuthSuccess.hidden = !success;
 }
 
 function setAuthBusy(busy) {
   authBusy = busy;
-  authSubmitBtn.disabled = busy;
-  authSubmitBtn.textContent = busy
-    ? (authMode === "signup" ? "Creating account…" : "Logging in…")
-    : (authMode === "signup" ? "Create account" : "Log in");
+  const activeBtn = authMode === "signup" ? signupSubmitBtn : loginSubmitBtn;
+  const idleBtn = authMode === "signup" ? loginSubmitBtn : signupSubmitBtn;
+
+  activeBtn.disabled = busy;
+  idleBtn.disabled = true;
+
+  loginSubmitBtn.textContent = busy && authMode === "login" ? "Logging in…" : "Log in";
+  signupSubmitBtn.textContent = busy && authMode === "signup" ? "Creating account…" : "Create account";
 }
 
 function setAuthMode(mode) {
@@ -140,20 +150,33 @@ function setAuthMode(mode) {
   authModeLoginBtn.setAttribute("aria-selected", (!isSignup).toString());
   authModeSignupBtn.setAttribute("aria-selected", isSignup.toString());
 
-  loginNameField.hidden = !isSignup;
-  loginConfirmField.hidden = !isSignup;
-  loginNameInput.required = isSignup;
-  loginConfirmInput.required = isSignup;
-  loginPasswordInput.autocomplete = isSignup ? "new-password" : "current-password";
+  // Keep forms fully separate in the DOM visibility so password managers
+  // don't see new-password fields while logging in.
+  loginForm.hidden = isSignup;
+  signupForm.hidden = !isSignup;
+
+  // Disable fields in the hidden form so password managers ignore them.
+  for (const el of loginForm.elements) el.disabled = isSignup;
+  for (const el of signupForm.elements) el.disabled = !isSignup;
 
   loginLead.textContent = isSignup
     ? "Create an account with your name, email, and password."
     : "Log in with your email to open the sales board.";
-  authSubmitBtn.textContent = isSignup ? "Create account" : "Log in";
+
+  // Carry email across modes for convenience
+  if (isSignup && loginEmailInput.value && !signupEmailInput.value) {
+    signupEmailInput.value = loginEmailInput.value;
+  }
+  if (!isSignup && signupEmailInput.value && !loginEmailInput.value) {
+    loginEmailInput.value = signupEmailInput.value;
+  }
+
   setAuthMessage();
+  setAuthBusy(false);
 
   requestAnimationFrame(() => {
-    (isSignup ? loginNameInput : loginEmailInput).focus();
+    if (isSignup) signupNameInput.focus();
+    else loginEmailInput.focus();
   });
 }
 
@@ -197,7 +220,23 @@ function applyAuthUser(user) {
   }
 }
 
-async function handleAuthSubmit(e) {
+/** Ask Chromium/Safari (where supported) to save credentials after SPA auth. */
+async function offerSavePassword(email, password, name = "") {
+  try {
+    if (!window.PasswordCredential || !navigator.credentials?.store) return;
+    const cred = new PasswordCredential({
+      id: String(email || "").trim(),
+      password: String(password || ""),
+      name: String(name || "").trim() || undefined,
+    });
+    await navigator.credentials.store(cred);
+  } catch (err) {
+    // Browser may decline; form autocomplete hints still handle most cases.
+    console.debug("Password save offer skipped:", err);
+  }
+}
+
+async function handleLoginSubmit(e) {
   e.preventDefault();
   if (authBusy) return;
 
@@ -211,24 +250,55 @@ async function handleAuthSubmit(e) {
 
   const email = loginEmailInput.value;
   const password = loginPasswordInput.value;
-  const name = loginNameInput.value;
-  const confirm = loginConfirmInput.value;
+  setAuthMessage();
+  setAuthBusy(true);
+
+  try {
+    const result = await auth.signIn({ email, password });
+    if (!result.ok) {
+      setAuthMessage({ error: result.error || "Authentication failed." });
+      return;
+    }
+
+    await offerSavePassword(email, password, result.user?.name);
+    applyAuthUser(result.user);
+    await startApp();
+  } catch (err) {
+    console.error(err);
+    setAuthMessage({ error: "Something went wrong. Please try again." });
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function handleSignupSubmit(e) {
+  e.preventDefault();
+  if (authBusy) return;
+
+  const auth = window.MHN_AUTH;
+  if (!auth?.isConfigured?.()) {
+    setAuthMessage({
+      error: "Supabase is not configured. Add your project URL and anon key in config.js.",
+    });
+    return;
+  }
+
+  const name = signupNameInput.value;
+  const email = signupEmailInput.value;
+  const password = signupPasswordInput.value;
+  const confirm = signupConfirmInput.value;
 
   setAuthMessage();
 
-  if (authMode === "signup") {
-    if (password !== confirm) {
-      setAuthMessage({ error: "Passwords do not match." });
-      loginConfirmInput.focus();
-      return;
-    }
+  if (password !== confirm) {
+    setAuthMessage({ error: "Passwords do not match." });
+    signupConfirmInput.focus();
+    return;
   }
 
   setAuthBusy(true);
   try {
-    const result = authMode === "signup"
-      ? await auth.signUp({ name, email, password })
-      : await auth.signIn({ email, password });
+    const result = await auth.signUp({ name, email, password });
 
     if (!result.ok) {
       setAuthMessage({ error: result.error || "Authentication failed." });
@@ -236,15 +306,18 @@ async function handleAuthSubmit(e) {
     }
 
     if (result.needsEmailConfirmation) {
-      setAuthMessage({
-        success: "Account created. Check your email to confirm, then log in.",
-      });
-      setAuthMode("login");
       loginEmailInput.value = email;
       loginPasswordInput.value = "";
+      signupPasswordInput.value = "";
+      signupConfirmInput.value = "";
+      setAuthMode("login");
+      loginAuthError.textContent = "Account created. Check your email to confirm, then log in.";
+      loginAuthError.hidden = false;
+      loginAuthError.classList.add("is-info");
       return;
     }
 
+    await offerSavePassword(email, password, name);
     applyAuthUser(result.user);
     await startApp();
   } catch (err) {
@@ -272,7 +345,9 @@ async function logout() {
   } finally {
     applyAuthUser(null);
     loginPasswordInput.value = "";
-    loginConfirmInput.value = "";
+    signupPasswordInput.value = "";
+    signupConfirmInput.value = "";
+    loginAuthError.classList.remove("is-info");
     setAuthBusy(false);
     setAuthMessage();
   }
@@ -2105,7 +2180,8 @@ async function startApp() {
 
 authModeLoginBtn.addEventListener("click", () => setAuthMode("login"));
 authModeSignupBtn.addEventListener("click", () => setAuthMode("signup"));
-loginForm.addEventListener("submit", handleAuthSubmit);
+loginForm.addEventListener("submit", handleLoginSubmit);
+signupForm.addEventListener("submit", handleSignupSubmit);
 logoutBtn.addEventListener("click", () => {
   logout();
 });

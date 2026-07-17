@@ -179,14 +179,17 @@ body {
   color: var(--danger);
 }
 
+.auth-error.is-info {
+  color: var(--pipeline-green-dark);
+}
+
 .auth-success {
   color: var(--pipeline-green-dark);
 }
 
 .auth-error[hidden],
 .auth-success[hidden],
-#loginNameField[hidden],
-#loginConfirmField[hidden] {
+.auth-form[hidden] {
   display: none !important;
 }
 
