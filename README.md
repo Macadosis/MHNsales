@@ -10,6 +10,17 @@ Personal sales pipeline tool (HubSpot-style Kanban) with a Claude Fable–inspir
 - Filters (Owner / Industry / Tool), search, notes
 - Cloud sync via Supabase (with localStorage fallback)
 
+## Cloud write protection
+
+Only the **GitHub Pages** app (`*.github.io`) can write to Supabase.
+
+| Origin | Read cloud | Write cloud |
+|--------|------------|-------------|
+| `https://macadosis.github.io/MHNsales/` | yes | **yes** |
+| `localhost` / `file://` / Desktop | yes | **no** |
+
+Use the deployed URL for real sales data. Local copies are for UI/preview only and cannot overwrite production.
+
 ## Setup
 
 ### 1. Supabase

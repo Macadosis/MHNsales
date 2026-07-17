@@ -97,7 +97,12 @@ function loadDeals() {
 function saveDeals() {
   const api = window.MHN_DB;
   if (api?.saveDealsAsync) {
-    api.saveDealsAsync(deals).catch((err) => {
+    api.saveDealsAsync(deals).then((result) => {
+      if (result?.writeBlocked) {
+        // Local-only save — cloud intentionally untouched
+        return;
+      }
+    }).catch((err) => {
       console.error(err);
       showSyncStatus("Could not sync to cloud — changes kept locally", true);
     });
@@ -106,7 +111,7 @@ function saveDeals() {
   }
 }
 
-function showSyncStatus(message, isError = false) {
+function showSyncStatus(message, isError = false, sticky = false) {
   let el = document.getElementById("syncStatus");
   if (!el) {
     el = document.createElement("div");
@@ -116,11 +121,28 @@ function showSyncStatus(message, isError = false) {
   }
   el.textContent = message;
   el.classList.toggle("is-error", isError);
+  el.classList.toggle("is-info", !isError && sticky);
   el.hidden = false;
   clearTimeout(showSyncStatus._timer);
-  showSyncStatus._timer = setTimeout(() => {
-    el.hidden = true;
-  }, isError ? 5000 : 2500);
+  if (!sticky) {
+    showSyncStatus._timer = setTimeout(() => {
+      el.hidden = true;
+    }, isError ? 5000 : 2500);
+  }
+}
+
+function showCloudReadOnlyBanner() {
+  if (document.getElementById("cloudReadOnlyBanner")) return;
+  const banner = document.createElement("div");
+  banner.id = "cloudReadOnlyBanner";
+  banner.className = "cloud-readonly-banner";
+  banner.innerHTML =
+    "<strong>Local / preview mode</strong> — cloud data is read-only here. " +
+    "Use the <a href=\"https://macadosis.github.io/MHNsales/\" target=\"_blank\" rel=\"noopener\">GitHub Pages app</a> " +
+    "to create or edit live deals.";
+  const topbar = document.querySelector(".topbar");
+  if (topbar) topbar.insertAdjacentElement("afterend", banner);
+  else document.body.prepend(banner);
 }
 
 async function refreshDealsFromRemote() {
@@ -129,7 +151,7 @@ async function refreshDealsFromRemote() {
   try {
     syncingFromRemote = true;
     deals = await api.loadDealsAsync();
-    migrateDeals();
+    migrateDeals({ persist: Boolean(api.cloudWriteEnabled) });
     render();
   } catch (err) {
     console.error(err);
@@ -138,7 +160,7 @@ async function refreshDealsFromRemote() {
   }
 }
 
-function migrateDeals() {
+function migrateDeals({ persist = true } = {}) {
   let changed = false;
   for (const deal of deals) {
     if (
@@ -156,7 +178,8 @@ function migrateDeals() {
       }
     }
   }
-  if (changed) saveDeals();
+  // Never push migration fixes from a write-blocked origin (avoids stale local→cloud)
+  if (changed && persist && window.MHN_DB?.cloudWriteEnabled) saveDeals();
 }
 
 function initPipelinePeriod() {
@@ -1430,10 +1453,19 @@ pipelinePeriodLength.addEventListener("change", () => {
 
 async function bootstrap() {
   const api = window.MHN_DB;
+
+  if (api?.isRemote && !api.cloudWriteEnabled) {
+    showCloudReadOnlyBanner();
+  }
+
   if (api?.loadDealsAsync) {
     try {
       deals = await api.loadDealsAsync();
-      if (api.isRemote) showSyncStatus("Synced with Supabase");
+      if (api.isRemote && api.cloudWriteEnabled) {
+        showSyncStatus("Synced with Supabase");
+      } else if (api.isRemote && !api.cloudWriteEnabled) {
+        showSyncStatus("Cloud read-only — local edits won’t upload", false, true);
+      }
     } catch (err) {
       console.error(err);
       deals = loadDeals();
@@ -1443,7 +1475,8 @@ async function bootstrap() {
     deals = loadDeals();
   }
 
-  migrateDeals();
+  // Persist migrate fixes only on the deployed write-enabled origin
+  migrateDeals({ persist: Boolean(api?.cloudWriteEnabled) });
   initPipelinePeriod();
   render();
 

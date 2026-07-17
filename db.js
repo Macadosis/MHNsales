@@ -1,4 +1,9 @@
-/* MHN Sales — Supabase data layer */
+/* MHN Sales — Supabase data layer
+ *
+ * Cloud WRITE is only allowed on GitHub Pages (*.github.io).
+ * file://, localhost, and other hosts can still READ from Supabase
+ * but never upsert / delete / migrate local data into the cloud.
+ */
 
 const LOCAL_STORAGE_KEY = "mhn-sales-deals";
 
@@ -12,7 +17,22 @@ function getSupabaseClient() {
   return window.supabase.createClient(url, key);
 }
 
+/** Only the deployed GitHub Pages app may write to Supabase. */
+function canWriteToCloud() {
+  try {
+    const protocol = location.protocol || "";
+    const host = (location.hostname || "").toLowerCase();
+    if (protocol === "file:") return false;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return false;
+    if (host.endsWith(".github.io")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 const db = getSupabaseClient();
+const cloudWriteEnabled = Boolean(db) && canWriteToCloud();
 
 function msToIso(ms) {
   if (ms == null || ms === "") return null;
@@ -87,6 +107,10 @@ async function fetchRemoteDeals() {
 }
 
 async function syncDealsToRemote(deals) {
+  if (!cloudWriteEnabled) {
+    throw new Error("Cloud writes are blocked on this origin");
+  }
+
   const rows = deals.map(dealToRow);
   if (rows.length) {
     const { error: upsertError } = await db.from("deals").upsert(rows, { onConflict: "id" });
@@ -104,9 +128,12 @@ async function syncDealsToRemote(deals) {
   }
 }
 
+/** One-time seed: local → remote only when cloud is empty AND writes are allowed. */
 async function migrateLocalToRemoteIfNeeded() {
   const remote = await fetchRemoteDeals();
   if (remote.length) return remote;
+
+  if (!cloudWriteEnabled) return remote;
 
   const local = loadLocalDeals();
   if (!local.length) return [];
@@ -115,26 +142,38 @@ async function migrateLocalToRemoteIfNeeded() {
   return local;
 }
 
-/** Load deals from Supabase (or localStorage fallback). */
+/** Load deals from Supabase (or localStorage fallback). Never pushes local→cloud when write-blocked. */
 async function loadDealsAsync() {
   if (!db) {
     console.warn("Supabase not configured — using localStorage only. Fill in config.js.");
     return loadLocalDeals();
   }
   try {
-    return await migrateLocalToRemoteIfNeeded();
+    if (cloudWriteEnabled) {
+      return await migrateLocalToRemoteIfNeeded();
+    }
+    // Read-only origins: pull cloud data only — never upload local cache
+    return await fetchRemoteDeals();
   } catch (err) {
     console.error("Failed to load from Supabase, falling back to localStorage:", err);
     return loadLocalDeals();
   }
 }
 
-/** Persist deals to Supabase and mirror to localStorage. */
+/**
+ * Persist deals.
+ * - Always mirrors to localStorage (per-origin cache).
+ * - Writes to Supabase only on allowed origins (*.github.io).
+ */
 async function saveDealsAsync(deals) {
   saveLocalDeals(deals);
-  if (!db) return;
+  if (!db) return { wroteToCloud: false };
+  if (!cloudWriteEnabled) {
+    return { wroteToCloud: false, writeBlocked: true };
+  }
   try {
     await syncDealsToRemote(deals);
+    return { wroteToCloud: true };
   } catch (err) {
     console.error("Failed to save to Supabase:", err);
     throw err;
@@ -160,6 +199,7 @@ function subscribeToDealChanges(onChange) {
 
 window.MHN_DB = {
   isRemote: Boolean(db),
+  cloudWriteEnabled,
   loadDealsAsync,
   saveDealsAsync,
   subscribeToDealChanges,

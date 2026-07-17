@@ -1545,6 +1545,29 @@ main {
   color: #fff;
 }
 
+.sync-status.is-info {
+  background: #3f6a82;
+  color: #fff;
+}
+
 .sync-status[hidden] {
   display: none;
+}
+
+.cloud-readonly-banner {
+  background: #e4eef5;
+  color: #3f6a82;
+  border-bottom: 1px solid #bfcfda;
+  padding: 10px 28px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.cloud-readonly-banner strong {
+  font-weight: 600;
+}
+
+.cloud-readonly-banner a {
+  color: var(--accent-hover);
+  font-weight: 500;
 }
