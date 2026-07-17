@@ -980,31 +980,44 @@ searchClearBtn.addEventListener("click", () => {
   searchInput.focus();
 });
 
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
 function scrollSearchIntoView() {
-  // Mobile search expands left from a fixed icon slot — scrolling the toolbar causes a visible nudge.
-  if (window.matchMedia("(max-width: 720px)").matches) return;
   const row = searchBubble.closest(".toolbar-scroll");
   if (!row) return;
   const rowRect = row.getBoundingClientRect();
   const bubbleRect = searchBubble.getBoundingClientRect();
   const pad = 12;
-  if (bubbleRect.left < rowRect.left + pad) {
-    row.scrollBy({ left: bubbleRect.left - rowRect.left - pad, behavior: "smooth" });
-  } else if (bubbleRect.right > rowRect.right - pad) {
+  if (bubbleRect.right > rowRect.right - pad) {
     row.scrollBy({ left: bubbleRect.right - rowRect.right + pad, behavior: "smooth" });
+  } else if (bubbleRect.left < rowRect.left + pad) {
+    row.scrollBy({ left: bubbleRect.left - rowRect.left - pad, behavior: "smooth" });
   }
 }
 
-searchInput.addEventListener("focus", () => {
-  scrollSearchIntoView();
-  setTimeout(scrollSearchIntoView, 220);
-});
-searchBubble.addEventListener("pointerdown", () => {
-  // Focus the input when tapping the icon-only control
-  if (document.activeElement !== searchInput) {
-    searchInput.focus();
-  }
+function expandSearch() {
+  searchBubble.classList.add("is-expanded");
+  if (document.activeElement !== searchInput) searchInput.focus();
+  // Let the width transition begin, then scroll the expanded field fully into view.
   requestAnimationFrame(scrollSearchIntoView);
+  setTimeout(scrollSearchIntoView, 220);
+}
+
+searchInput.addEventListener("focus", expandSearch);
+searchInput.addEventListener("blur", () => {
+  if (!searchInput.value) searchBubble.classList.remove("is-expanded");
+});
+
+searchBubble.addEventListener("pointerdown", (e) => {
+  // On mobile the field is icon-only until tapped; expand and focus it.
+  if (isMobileViewport() && !searchBubble.classList.contains("is-expanded")) {
+    e.preventDefault();
+    expandSearch();
+  } else {
+    requestAnimationFrame(scrollSearchIntoView);
+  }
 });
 
 /* ------------------------------ Rendering ---------------------- */
