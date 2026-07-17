@@ -1,5 +1,6 @@
 /* MHN Sales — Supabase credentials
  * Project: MHNsales
+ * Auth: enable Email provider; for a small team, disable Confirm email.
  */
 window.MHN_CONFIG = {
   supabaseUrl: "https://mwkmupbtlfpxjdyznzqy.supabase.co",

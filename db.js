@@ -64,6 +64,7 @@ function dealToRow(deal) {
     owner: deal.owner || "",
     stage: deal.stage || "prospects",
     implementation_days: deal.implementationDays ?? null,
+    board_order: deal.boardOrder ?? null,
     committed_at: msToIso(deal.committedAt),
     dismissed_at: msToIso(deal.dismissedAt),
     created_at: msToIso(deal.createdAt) || new Date().toISOString(),
@@ -85,6 +86,7 @@ function rowToDeal(row) {
     owner: row.owner || "",
     stage: row.stage || "prospects",
     implementationDays: row.implementation_days ?? undefined,
+    boardOrder: row.board_order ?? undefined,
     committedAt: isoToMs(row.committed_at) ?? undefined,
     dismissedAt: isoToMs(row.dismissed_at) ?? undefined,
     createdAt: isoToMs(row.created_at) || Date.now(),
@@ -125,7 +127,12 @@ async function upsertDealsToRemote(deals) {
   assertCloudWriteAllowed();
   if (!deals.length) return;
   const rows = deals.map(dealToRow);
-  const { error } = await db.from("deals").upsert(rows, { onConflict: "id" });
+  let { error } = await db.from("deals").upsert(rows, { onConflict: "id" });
+  // Older schemas may lack board_order — retry without it so sync still works.
+  if (error && /board_order/i.test(error.message || "")) {
+    const stripped = rows.map(({ board_order, ...rest }) => rest);
+    ({ error } = await db.from("deals").upsert(stripped, { onConflict: "id" }));
+  }
   if (error) throw error;
 }
 
@@ -233,6 +240,7 @@ function subscribeToDealChanges(onChange) {
 }
 
 window.MHN_DB = {
+  client: db,
   isRemote: Boolean(db),
   get cloudWriteEnabled() {
     return cloudWriteAllowedByOrigin && cloudHydrated;

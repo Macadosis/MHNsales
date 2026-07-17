@@ -10,8 +10,80 @@
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="is-logged-out">
 
+  <!-- Login gate -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="login-brand">
+        <img src="logo.png" alt="MHN logo" class="login-logo" />
+        <h1 id="loginTitle" class="login-title">MHN Sales</h1>
+      </div>
+      <p class="login-lead" id="loginLead">Log in with your email to open the sales board.</p>
+
+      <div class="auth-mode-tabs" role="tablist" aria-label="Account">
+        <button type="button" class="auth-mode-tab is-active" id="authModeLogin" role="tab" aria-selected="true" data-auth-mode="login">
+          Log in
+        </button>
+        <button type="button" class="auth-mode-tab" id="authModeSignup" role="tab" aria-selected="false" data-auth-mode="signup">
+          Create account
+        </button>
+      </div>
+
+      <form id="loginForm" autocomplete="on">
+        <label class="field" id="loginNameField" hidden>
+          <span class="field-label">Your name</span>
+          <input
+            type="text"
+            name="displayName"
+            id="loginNameInput"
+            maxlength="80"
+            placeholder="e.g. Alex Müller"
+            autocomplete="name"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input
+            type="email"
+            name="email"
+            id="loginEmailInput"
+            required
+            placeholder="you@company.com"
+            autocomplete="email"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input
+            type="password"
+            name="password"
+            id="loginPasswordInput"
+            required
+            minlength="6"
+            placeholder="At least 6 characters"
+            autocomplete="current-password"
+          />
+        </label>
+        <label class="field" id="loginConfirmField" hidden>
+          <span class="field-label">Confirm password</span>
+          <input
+            type="password"
+            name="confirmPassword"
+            id="loginConfirmInput"
+            minlength="6"
+            placeholder="Repeat password"
+            autocomplete="new-password"
+          />
+        </label>
+        <p class="auth-error" id="authError" hidden role="alert"></p>
+        <p class="auth-success" id="authSuccess" hidden role="status"></p>
+        <button type="submit" class="btn btn-primary login-submit" id="authSubmitBtn">Log in</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="app-shell" id="appShell" hidden>
   <header class="topbar">
     <div class="brand">
       <img src="logo.png" alt="MHN logo" class="brand-logo" />
@@ -37,10 +109,18 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="history">History</button>
       </nav>
     </div>
-    <button class="btn btn-primary new-deal-btn" id="newDealBtn" aria-label="New deal">
-      <span class="new-deal-label">New deal</span>
-      <span class="new-deal-icon" aria-hidden="true">+</span>
-    </button>
+    <div class="topbar-actions">
+      <div class="user-chip" id="userChip" hidden>
+        <span class="user-chip-label" id="userChipName"></span>
+        <button type="button" class="user-chip-logout" id="logoutBtn" aria-label="Log out">
+          Log out
+        </button>
+      </div>
+      <button class="btn btn-primary new-deal-btn" id="newDealBtn" aria-label="New deal">
+        <span class="new-deal-label">New deal</span>
+        <span class="new-deal-icon" aria-hidden="true">+</span>
+      </button>
+    </div>
   </header>
 
   <main>
@@ -110,6 +190,7 @@
       <div class="history-list" id="historyList"></div>
     </section>
   </main>
+  </div><!-- /.app-shell -->
 
   <!-- Card create / edit modal -->
   <div class="modal-overlay" id="modalOverlay" hidden>
@@ -360,6 +441,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <script src="db.js"></script>
+  <script src="auth.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

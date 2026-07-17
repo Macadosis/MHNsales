@@ -24,6 +24,7 @@ const PIPELINE_BAR_HEIGHT = 36;
 const PIPELINE_BAR_TOP = (PIPELINE_ROW_HEIGHT - PIPELINE_BAR_HEIGHT) / 2;
 
 let deals = [];
+let currentUser = null; // { name: string }
 let editingId = null;   // deal being edited in the modal (null = creating)
 let modalReadOnly = false; // when true the modal shows a deal but blocks edits
 let createStage = "prospects"; // stage a new deal is created into
@@ -33,6 +34,7 @@ let activeTab = "board";
 let modalNotes = [];
 let modalPanel = "details";
 let syncingFromRemote = false;
+let appStarted = false;
 
 const pipelineState = {
   periodMonths: 4,
@@ -85,6 +87,196 @@ const fmtEuro = new Intl.NumberFormat("de-DE", {
   currency: "EUR",
   maximumFractionDigits: 0,
 });
+
+/* ------------------------------ Auth / session ----------------- */
+
+const loginScreen = document.getElementById("loginScreen");
+const loginForm = document.getElementById("loginForm");
+const loginNameField = document.getElementById("loginNameField");
+const loginNameInput = document.getElementById("loginNameInput");
+const loginEmailInput = document.getElementById("loginEmailInput");
+const loginPasswordInput = document.getElementById("loginPasswordInput");
+const loginConfirmField = document.getElementById("loginConfirmField");
+const loginConfirmInput = document.getElementById("loginConfirmInput");
+const loginLead = document.getElementById("loginLead");
+const authErrorEl = document.getElementById("authError");
+const authSuccessEl = document.getElementById("authSuccess");
+const authSubmitBtn = document.getElementById("authSubmitBtn");
+const authModeLoginBtn = document.getElementById("authModeLogin");
+const authModeSignupBtn = document.getElementById("authModeSignup");
+const appShell = document.getElementById("appShell");
+const userChip = document.getElementById("userChip");
+const userChipName = document.getElementById("userChipName");
+const logoutBtn = document.getElementById("logoutBtn");
+
+let authMode = "login"; // "login" | "signup"
+let authBusy = false;
+
+function getCurrentUserName() {
+  return currentUser?.name || "";
+}
+
+function setAuthMessage({ error = "", success = "" } = {}) {
+  authErrorEl.textContent = error;
+  authErrorEl.hidden = !error;
+  authSuccessEl.textContent = success;
+  authSuccessEl.hidden = !success;
+}
+
+function setAuthBusy(busy) {
+  authBusy = busy;
+  authSubmitBtn.disabled = busy;
+  authSubmitBtn.textContent = busy
+    ? (authMode === "signup" ? "Creating account…" : "Logging in…")
+    : (authMode === "signup" ? "Create account" : "Log in");
+}
+
+function setAuthMode(mode) {
+  authMode = mode === "signup" ? "signup" : "login";
+  const isSignup = authMode === "signup";
+
+  authModeLoginBtn.classList.toggle("is-active", !isSignup);
+  authModeSignupBtn.classList.toggle("is-active", isSignup);
+  authModeLoginBtn.setAttribute("aria-selected", (!isSignup).toString());
+  authModeSignupBtn.setAttribute("aria-selected", isSignup.toString());
+
+  loginNameField.hidden = !isSignup;
+  loginConfirmField.hidden = !isSignup;
+  loginNameInput.required = isSignup;
+  loginConfirmInput.required = isSignup;
+  loginPasswordInput.autocomplete = isSignup ? "new-password" : "current-password";
+
+  loginLead.textContent = isSignup
+    ? "Create an account with your name, email, and password."
+    : "Log in with your email to open the sales board.";
+  authSubmitBtn.textContent = isSignup ? "Create account" : "Log in";
+  setAuthMessage();
+
+  requestAnimationFrame(() => {
+    (isSignup ? loginNameInput : loginEmailInput).focus();
+  });
+}
+
+function showLoginScreen() {
+  document.body.classList.add("is-logged-out");
+  appShell.hidden = true;
+  loginScreen.hidden = false;
+  userChip.hidden = true;
+  setAuthBusy(false);
+  setAuthMode(authMode);
+}
+
+function showAppShell() {
+  document.body.classList.remove("is-logged-out");
+  loginScreen.hidden = true;
+  appShell.hidden = false;
+  updateUserChip();
+}
+
+function updateUserChip() {
+  const name = getCurrentUserName();
+  if (!name) {
+    userChip.hidden = true;
+    return;
+  }
+  userChipName.textContent = name;
+  userChipName.title = currentUser?.email
+    ? `${name} (${currentUser.email})`
+    : name;
+  userChip.hidden = false;
+}
+
+function applyAuthUser(user) {
+  currentUser = user
+    ? { id: user.id, email: user.email || "", name: user.name || "" }
+    : null;
+  if (currentUser) {
+    showAppShell();
+  } else {
+    showLoginScreen();
+  }
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  if (authBusy) return;
+
+  const auth = window.MHN_AUTH;
+  if (!auth?.isConfigured?.()) {
+    setAuthMessage({
+      error: "Supabase is not configured. Add your project URL and anon key in config.js.",
+    });
+    return;
+  }
+
+  const email = loginEmailInput.value;
+  const password = loginPasswordInput.value;
+  const name = loginNameInput.value;
+  const confirm = loginConfirmInput.value;
+
+  setAuthMessage();
+
+  if (authMode === "signup") {
+    if (password !== confirm) {
+      setAuthMessage({ error: "Passwords do not match." });
+      loginConfirmInput.focus();
+      return;
+    }
+  }
+
+  setAuthBusy(true);
+  try {
+    const result = authMode === "signup"
+      ? await auth.signUp({ name, email, password })
+      : await auth.signIn({ email, password });
+
+    if (!result.ok) {
+      setAuthMessage({ error: result.error || "Authentication failed." });
+      return;
+    }
+
+    if (result.needsEmailConfirmation) {
+      setAuthMessage({
+        success: "Account created. Check your email to confirm, then log in.",
+      });
+      setAuthMode("login");
+      loginEmailInput.value = email;
+      loginPasswordInput.value = "";
+      return;
+    }
+
+    applyAuthUser(result.user);
+    await startApp();
+  } catch (err) {
+    console.error(err);
+    setAuthMessage({ error: "Something went wrong. Please try again." });
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function logout() {
+  const auth = window.MHN_AUTH;
+  setAuthBusy(true);
+  try {
+    if (auth?.signOut) {
+      const result = await auth.signOut();
+      if (!result.ok) {
+        setAuthMessage({ error: result.error || "Could not log out." });
+        showLoginScreen();
+        return;
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  } finally {
+    applyAuthUser(null);
+    loginPasswordInput.value = "";
+    loginConfirmInput.value = "";
+    setAuthBusy(false);
+    setAuthMessage();
+  }
+}
 
 /* ------------------------------ Storage ------------------------ */
 
@@ -201,8 +393,76 @@ function migrateDeals({ persist = true } = {}) {
       }
     }
   }
+
+  if (ensureBoardOrders()) changed = true;
+
   // Never push migration fixes from a write-blocked origin (avoids stale local→cloud)
   if (changed && persist && window.MHN_DB?.cloudWriteEnabled) saveDeals();
+}
+
+function compareBoardOrder(a, b) {
+  const ao = a.boardOrder;
+  const bo = b.boardOrder;
+  if (ao != null && bo != null && ao !== bo) return ao - bo;
+  if (ao != null && bo == null) return -1;
+  if (ao == null && bo != null) return 1;
+  return (a.createdAt || 0) - (b.createdAt || 0);
+}
+
+function getStageDeals(stage, { excludeId } = {}) {
+  return deals
+    .filter(
+      (d) =>
+        !d.dismissedAt &&
+        d.stage === stage &&
+        d.id !== excludeId
+    )
+    .sort(compareBoardOrder);
+}
+
+/** Assign missing boardOrder values so column order is stable and rearrangeable. */
+function ensureBoardOrders() {
+  let changed = false;
+  const byStage = new Map();
+
+  for (const deal of deals) {
+    if (deal.dismissedAt) continue;
+    const stage = deal.stage || "prospects";
+    if (!byStage.has(stage)) byStage.set(stage, []);
+    byStage.get(stage).push(deal);
+  }
+
+  for (const list of byStage.values()) {
+    list.sort(compareBoardOrder);
+    list.forEach((deal, index) => {
+      if (deal.boardOrder !== index) {
+        deal.boardOrder = index;
+        changed = true;
+      }
+    });
+  }
+
+  return changed;
+}
+
+function nextBoardOrder(stage) {
+  const list = getStageDeals(stage);
+  if (!list.length) return 0;
+  return Math.max(...list.map((d) => d.boardOrder ?? 0)) + 1;
+}
+
+function reorderDeal(deal, targetStage, insertBeforeId) {
+  const siblings = getStageDeals(targetStage, { excludeId: deal.id });
+  let insertAt = siblings.length;
+  if (insertBeforeId) {
+    const idx = siblings.findIndex((d) => d.id === insertBeforeId);
+    if (idx >= 0) insertAt = idx;
+  }
+  siblings.splice(insertAt, 0, deal);
+  deal.stage = targetStage;
+  siblings.forEach((d, i) => {
+    d.boardOrder = i;
+  });
 }
 
 function initPipelinePeriod() {
@@ -635,6 +895,28 @@ searchClearBtn.addEventListener("click", () => {
   searchInput.focus();
 });
 
+function scrollSearchIntoView() {
+  const row = searchBubble.closest(".toolbar-scroll");
+  if (!row) return;
+  const rowRect = row.getBoundingClientRect();
+  const bubbleRect = searchBubble.getBoundingClientRect();
+  const pad = 12;
+  if (bubbleRect.left < rowRect.left + pad) {
+    row.scrollBy({ left: bubbleRect.left - rowRect.left - pad, behavior: "smooth" });
+  } else if (bubbleRect.right > rowRect.right - pad) {
+    row.scrollBy({ left: bubbleRect.right - rowRect.right + pad, behavior: "smooth" });
+  }
+}
+
+searchInput.addEventListener("focus", () => {
+  scrollSearchIntoView();
+  // Search field expands on focus — scroll again after the width transition
+  setTimeout(scrollSearchIntoView, 220);
+});
+searchBubble.addEventListener("pointerdown", () => {
+  requestAnimationFrame(scrollSearchIntoView);
+});
+
 /* ------------------------------ Rendering ---------------------- */
 
 function render() {
@@ -957,7 +1239,9 @@ function shiftPipelinePeriod(direction) {
 }
 
 function renderColumn(stage, visibleDeals) {
-  const stageDeals = visibleDeals.filter((d) => d.stage === stage.id);
+  const stageDeals = visibleDeals
+    .filter((d) => d.stage === stage.id)
+    .sort(compareBoardOrder);
   const total = stageDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
   const filtersActive = hasActiveFilters();
 
@@ -1008,14 +1292,12 @@ function renderColumn(stage, visibleDeals) {
   footer.innerHTML = `<span class="total-label">Total</span><span class="total-value">${fmtEuro.format(total)}</span>`;
 
   col.append(header, body, footer);
-  attachDropHandlers(col);
   return col;
 }
 
 function renderCard(deal) {
   const card = document.createElement("article");
   card.className = "card";
-  card.draggable = true;
   card.dataset.id = deal.id;
 
   const company = document.createElement("h3");
@@ -1068,51 +1350,211 @@ function renderCard(deal) {
   if (tags.childElementCount) card.append(tags);
   card.append(row);
 
-  card.addEventListener("click", () => openModal({ deal }));
-
-  card.addEventListener("dragstart", (e) => {
-    e.dataTransfer.setData("text/plain", deal.id);
-    e.dataTransfer.effectAllowed = "move";
-    requestAnimationFrame(() => card.classList.add("dragging"));
+  card.addEventListener("click", (e) => {
+    if (card.dataset.suppressClick === "1") {
+      e.preventDefault();
+      e.stopPropagation();
+      delete card.dataset.suppressClick;
+      return;
+    }
+    openModal({ deal });
   });
-  card.addEventListener("dragend", () => card.classList.remove("dragging"));
+
+  attachCardPointerDrag(card, deal);
 
   return card;
 }
 
 /* ------------------------------ Drag & drop -------------------- */
 
-function moveDeal(deal, stage) {
-  deal.stage = stage;
+const DRAG_HOLD_MS = 160;
+const DRAG_MOVE_CANCEL_PX = 10;
+const DRAG_MOUSE_ACTIVATE_PX = 6;
+const DRAG_SCROLL_EDGE = 52;
+const DRAG_SCROLL_SPEED = 14;
+
+let dragState = null;
+
+function clearDropIndicators() {
+  document.querySelectorAll(".card.drop-before, .card.drop-after, .column-body.drop-target").forEach((el) => {
+    el.classList.remove("drop-before", "drop-after", "drop-target");
+  });
+}
+
+function cleanupDrag() {
+  if (!dragState) return;
+  if (dragState.timer) clearTimeout(dragState.timer);
+  if (dragState.scrollRaf) cancelAnimationFrame(dragState.scrollRaf);
+  if (dragState.sourceEl) {
+    dragState.sourceEl.classList.remove("is-drag-source", "dragging");
+  }
+  clearDropIndicators();
+  document.body.classList.remove("is-card-dragging");
+  dragState = null;
+}
+
+function getDropTargetAt(clientX, clientY) {
+  const stack = document.elementsFromPoint(clientX, clientY);
+  let card = null;
+  let column = null;
+  for (const el of stack) {
+    if (!card && el.classList?.contains("card") && !el.classList.contains("is-drag-source")) {
+      card = el;
+    }
+    if (!column && el.classList?.contains("column")) {
+      column = el;
+    }
+    if (card && column) break;
+  }
+  if (!column) return null;
+
+  const stage = column.dataset.stage;
+  if (card) {
+    const rect = card.getBoundingClientRect();
+    const before = clientY < rect.top + rect.height / 2;
+    return {
+      stage,
+      insertBeforeId: before ? card.dataset.id : (card.nextElementSibling?.dataset?.id || null),
+      indicatorCard: card,
+      before,
+    };
+  }
+
+  return { stage, insertBeforeId: null, indicatorCard: null, before: false };
+}
+
+function updateDropIndicators(target) {
+  clearDropIndicators();
+  if (!target) return;
+  if (target.indicatorCard) {
+    target.indicatorCard.classList.add(target.before ? "drop-before" : "drop-after");
+  } else {
+    const body = document.querySelector(`.column[data-stage="${target.stage}"] .column-body`);
+    if (body) body.classList.add("drop-target");
+  }
+}
+
+function autoScrollDuringDrag(clientX, clientY) {
+  if (!dragState?.activated) return;
+
+  const boardRect = boardEl.getBoundingClientRect();
+  if (clientX > boardRect.right - DRAG_SCROLL_EDGE) boardEl.scrollLeft += DRAG_SCROLL_SPEED;
+  else if (clientX < boardRect.left + DRAG_SCROLL_EDGE) boardEl.scrollLeft -= DRAG_SCROLL_SPEED;
+
+  const stack = document.elementsFromPoint(clientX, clientY);
+  const body = stack.find((el) => el.classList?.contains("column-body"));
+  if (body) {
+    const rect = body.getBoundingClientRect();
+    if (clientY > rect.bottom - DRAG_SCROLL_EDGE) body.scrollTop += DRAG_SCROLL_SPEED;
+    else if (clientY < rect.top + DRAG_SCROLL_EDGE) body.scrollTop -= DRAG_SCROLL_SPEED;
+  }
+
+  dragState.scrollRaf = requestAnimationFrame(() => {
+    if (!dragState?.activated) return;
+    autoScrollDuringDrag(dragState.lastX, dragState.lastY);
+  });
+}
+
+function activateDrag() {
+  if (!dragState || dragState.activated) return;
+  dragState.activated = true;
+  dragState.sourceEl.classList.add("is-drag-source", "dragging");
+  document.body.classList.add("is-card-dragging");
+  try {
+    dragState.sourceEl.setPointerCapture(dragState.pointerId);
+  } catch {
+    /* ignore */
+  }
+  updateDropIndicators(getDropTargetAt(dragState.lastX, dragState.lastY));
+  autoScrollDuringDrag(dragState.lastX, dragState.lastY);
+}
+
+function commitDragDrop(clientX, clientY) {
+  if (!dragState?.activated) return;
+  const deal = deals.find((d) => d.id === dragState.dealId);
+  if (!deal) return;
+
+  const target = getDropTargetAt(clientX, clientY);
+  if (!target) return;
+
+  if (target.stage === "committed" && deal.stage !== "committed") {
+    openCommitModal(deal);
+    return;
+  }
+
+  const ordered = getStageDeals(deal.stage);
+  const oldIndex = ordered.findIndex((d) => d.id === deal.id);
+  const nextId = ordered[oldIndex + 1]?.id || null;
+  if (deal.stage === target.stage && target.insertBeforeId === nextId) return;
+
+  reorderDeal(deal, target.stage, target.insertBeforeId);
   saveDeals();
   render();
 }
 
-function attachDropHandlers(col) {
-  col.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    col.classList.add("drag-over");
-  });
-  col.addEventListener("dragleave", (e) => {
-    if (!col.contains(e.relatedTarget)) col.classList.remove("drag-over");
-  });
-  col.addEventListener("drop", (e) => {
-    e.preventDefault();
-    col.classList.remove("drag-over");
-    const id = e.dataTransfer.getData("text/plain");
-    const deal = deals.find((d) => d.id === id);
-    if (!deal) return;
+function attachCardPointerDrag(card, deal) {
+  card.addEventListener("pointerdown", (e) => {
+    if (e.button != null && e.button !== 0) return;
+    if (dragState) cleanupDrag();
 
-    const targetStage = col.dataset.stage;
-    if (targetStage === "committed") {
-      openCommitModal(deal);
-      return;
+    dragState = {
+      dealId: deal.id,
+      pointerId: e.pointerId,
+      pointerType: e.pointerType,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      activated: false,
+      sourceEl: card,
+      timer: null,
+      scrollRaf: null,
+    };
+
+    if (e.pointerType === "touch" || e.pointerType === "pen") {
+      dragState.timer = setTimeout(activateDrag, DRAG_HOLD_MS);
     }
-    if (deal.stage === targetStage) return;
-    moveDeal(deal, targetStage);
   });
 }
+
+document.addEventListener("pointermove", (e) => {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+
+  dragState.lastX = e.clientX;
+  dragState.lastY = e.clientY;
+  const dist = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY);
+
+  if (!dragState.activated) {
+    if (dragState.pointerType === "mouse") {
+      if (dist >= DRAG_MOUSE_ACTIVATE_PX) activateDrag();
+    } else if (dist >= DRAG_MOVE_CANCEL_PX) {
+      cleanupDrag();
+    }
+    return;
+  }
+
+  e.preventDefault();
+  updateDropIndicators(getDropTargetAt(e.clientX, e.clientY));
+}, { passive: false });
+
+document.addEventListener("pointerup", (e) => {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  const { lastX, lastY, activated, sourceEl } = dragState;
+  if (activated) commitDragDrop(lastX, lastY);
+  cleanupDrag();
+  // Keep suppressClick briefly so the synthetic click doesn't open the modal
+  if (activated && sourceEl) {
+    sourceEl.dataset.suppressClick = "1";
+    setTimeout(() => {
+      delete sourceEl.dataset.suppressClick;
+    }, 0);
+  }
+});
+
+document.addEventListener("pointercancel", (e) => {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  cleanupDrag();
+});
 
 /* --------------------------- Commit modal ----------------------- */
 
@@ -1145,7 +1587,7 @@ commitForm.addEventListener("submit", (e) => {
 
   pendingCommitDeal.committedAt = startDate;
   pendingCommitDeal.implementationDays = days;
-  pendingCommitDeal.stage = "committed";
+  reorderDeal(pendingCommitDeal, "committed", null);
   saveDeals();
   render();
   closeCommitModal();
@@ -1326,6 +1768,7 @@ function openModal({ deal = null, stage = "prospects", readOnly = false } = {}) 
     implementationFields.hidden = true;
     form.elements.implementationStart.required = false;
     form.elements.implementationDuration.required = false;
+    form.elements.owner.value = getCurrentUserName();
   }
 
   modalTitle.textContent = modalReadOnly
@@ -1466,6 +1909,7 @@ form.addEventListener("submit", (e) => {
       stage: createStage,
       createdAt,
       ...data,
+      boardOrder: nextBoardOrder(createStage),
       notes: [makeDealCreationNote(createdAt), ...(data.notes || [])],
     });
   }
@@ -1577,6 +2021,50 @@ pipelinePeriodLength.addEventListener("change", () => {
 });
 
 async function bootstrap() {
+  const auth = window.MHN_AUTH;
+
+  if (!auth?.isConfigured?.()) {
+    showLoginScreen();
+    setAuthMessage({
+      error: "Supabase is not configured. Add your project URL and anon key in config.js.",
+    });
+    return;
+  }
+
+  try {
+    const user = await auth.getCurrentAuthUser();
+    if (!user) {
+      showLoginScreen();
+      return;
+    }
+    applyAuthUser(user);
+    await startApp();
+  } catch (err) {
+    console.error(err);
+    showLoginScreen();
+    setAuthMessage({ error: "Could not restore your session. Please log in again." });
+  }
+
+  auth.onAuthStateChange((user) => {
+    if (!user) {
+      applyAuthUser(null);
+      return;
+    }
+    // Keep chip/name in sync if metadata changes; don't restart the app mid-session.
+    if (currentUser?.id === user.id) {
+      currentUser = { id: user.id, email: user.email || "", name: user.name || "" };
+      updateUserChip();
+    }
+  });
+}
+
+async function startApp() {
+  if (appStarted) {
+    render();
+    return;
+  }
+  appStarted = true;
+
   const api = window.MHN_DB;
 
   // Banner based on origin, even before hydration
@@ -1614,5 +2102,17 @@ async function bootstrap() {
     });
   }
 }
+
+authModeLoginBtn.addEventListener("click", () => setAuthMode("login"));
+authModeSignupBtn.addEventListener("click", () => setAuthMode("signup"));
+loginForm.addEventListener("submit", handleAuthSubmit);
+logoutBtn.addEventListener("click", () => {
+  logout();
+});
+
+Object.assign(window.MHN_AUTH, {
+  getCurrentUserName,
+  getCurrentUser: () => (currentUser ? { ...currentUser } : null),
+});
 
 bootstrap();
