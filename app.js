@@ -960,6 +960,7 @@ function renderFilters(containerEl, clearBtn) {
   if (scrollRow) {
     scrollRow.classList.toggle("is-menu-open", openFilterKey !== null);
   }
+  scrollClearFiltersIntoView(clearBtn);
 }
 
 document.addEventListener("click", closeFilterMenus);
@@ -977,7 +978,9 @@ function applySearch(value) {
   const hasQuery = searchQuery.length > 0;
   searchBubble.classList.toggle("has-query", hasQuery);
   searchClearBtn.hidden = !hasQuery;
-  render();
+  // Debounce board re-render so typing doesn't fight the caret / keyboard on iOS.
+  clearTimeout(applySearch._timer);
+  applySearch._timer = setTimeout(() => render(), 80);
 }
 
 searchInput.addEventListener("input", () => applySearch(searchInput.value));
@@ -1011,11 +1014,29 @@ function scrollSearchIntoView() {
   }
 }
 
+/** Keep the clear-filters chip fully visible inside the horizontal toolbar. */
+function scrollClearFiltersIntoView(clearBtn) {
+  if (!clearBtn || clearBtn.hidden) return;
+  const row = clearBtn.closest(".toolbar-scroll");
+  if (!row) return;
+  requestAnimationFrame(() => {
+    const rowRect = row.getBoundingClientRect();
+    const btnRect = clearBtn.getBoundingClientRect();
+    const pad = 12;
+    if (btnRect.right > rowRect.right - pad) {
+      row.scrollBy({ left: btnRect.right - rowRect.right + pad, behavior: "smooth" });
+    } else if (btnRect.left < rowRect.left + pad) {
+      row.scrollBy({ left: btnRect.left - rowRect.left - pad, behavior: "smooth" });
+    }
+  });
+}
+
 function expandSearch() {
   searchBubble.classList.add("is-expanded");
-  if (document.activeElement !== searchInput) searchInput.focus();
-  // Let the width transition begin, then scroll the expanded field fully into view.
-  requestAnimationFrame(scrollSearchIntoView);
+  if (document.activeElement !== searchInput) {
+    searchInput.focus({ preventScroll: true });
+  }
+  // After the bubble finishes expanding, bring it fully into the toolbar viewport.
   setTimeout(scrollSearchIntoView, 220);
 }
 
@@ -1029,8 +1050,6 @@ searchBubble.addEventListener("pointerdown", (e) => {
   if (isMobileViewport() && !searchBubble.classList.contains("is-expanded")) {
     e.preventDefault();
     expandSearch();
-  } else {
-    requestAnimationFrame(scrollSearchIntoView);
   }
 });
 
