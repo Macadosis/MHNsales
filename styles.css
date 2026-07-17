@@ -763,7 +763,7 @@ main {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 4px 12px 12px;
+  padding: 12px;
   overflow-y: auto;
   min-height: 80px;
 }
@@ -807,8 +807,9 @@ main {
   cursor: grab;
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
-  /* Prevent the browser from stealing the gesture for scroll/zoom before long-press activates */
-  touch-action: none;
+  /* Allow the page/column to scroll when a touch starts on a card; a still hold
+     activates drag, while a scrolling gesture cancels the pending long-press. */
+  touch-action: pan-x pan-y;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -855,18 +856,19 @@ main {
 }
 
 .card.drop-before {
-  box-shadow: 0 -3px 0 0 var(--accent), var(--shadow-card);
+  box-shadow: 0 -3px 0 0 var(--ink-faint), var(--shadow-card);
 }
 
 .card.drop-after {
-  box-shadow: 0 3px 0 0 var(--accent), var(--shadow-card);
+  box-shadow: 0 3px 0 0 var(--ink-faint), var(--shadow-card);
 }
 
-.column-body.drop-target {
-  outline: 2px dashed var(--accent);
+/* Whole placeholder is highlighted while a dragged card hovers over it */
+.column-body.is-drop-active {
+  outline: 2px dashed var(--ink-faint);
   outline-offset: -6px;
   border-radius: var(--radius-md);
-  background: var(--accent-soft);
+  background: rgba(20, 20, 19, 0.06);
 }
 
 body.is-card-dragging {

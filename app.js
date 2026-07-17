@@ -424,14 +424,28 @@ function showCloudReadOnlyBanner() {
   else document.body.prepend(banner);
 }
 
+let lastRenderedSignature = null;
+let pendingRemoteRefresh = false;
+
 async function refreshDealsFromRemote() {
   const api = window.MHN_DB;
   if (!api?.isRemote || !api.loadDealsAsync) return;
+  // Never rebuild the board mid-drag; queue the update until the drag ends.
+  if (dragState) {
+    pendingRemoteRefresh = true;
+    return;
+  }
   try {
     syncingFromRemote = true;
     deals = await api.loadDealsAsync();
     migrateDeals({ persist: Boolean(api.cloudWriteEnabled) });
-    render();
+    // Skip the (destructive) re-render when nothing actually changed, so a
+    // hovered card isn't torn down and rebuilt by realtime echo events.
+    const signature = JSON.stringify(deals);
+    if (signature !== lastRenderedSignature) {
+      lastRenderedSignature = signature;
+      render();
+    }
   } catch (err) {
     console.error(err);
   } finally {
@@ -1023,6 +1037,7 @@ searchBubble.addEventListener("pointerdown", (e) => {
 /* ------------------------------ Rendering ---------------------- */
 
 function render() {
+  lastRenderedSignature = JSON.stringify(deals);
   if (activeTab === "board") {
     renderFilters(filtersEl, clearFiltersBtn);
     renderBoard();
@@ -1479,9 +1494,11 @@ const DRAG_SCROLL_SPEED = 14;
 let dragState = null;
 
 function clearDropIndicators() {
-  document.querySelectorAll(".card.drop-before, .card.drop-after, .column-body.drop-target").forEach((el) => {
-    el.classList.remove("drop-before", "drop-after", "drop-target");
-  });
+  document
+    .querySelectorAll(".card.drop-before, .card.drop-after, .column-body.is-drop-active")
+    .forEach((el) => {
+      el.classList.remove("drop-before", "drop-after", "is-drop-active");
+    });
 }
 
 function cleanupDrag() {
@@ -1495,9 +1512,16 @@ function cleanupDrag() {
   clearDropIndicators();
   document.body.classList.remove("is-card-dragging");
   dragState = null;
+  // A remote update may have arrived while dragging — apply it now.
+  if (pendingRemoteRefresh) {
+    pendingRemoteRefresh = false;
+    refreshDealsFromRemote();
+  }
 }
 
 function createDragGhost(card, clientX, clientY) {
+  // Defensive: never leave a stray ghost behind from a previous drag.
+  document.querySelectorAll(".card-drag-ghost").forEach((el) => el.remove());
   const rect = card.getBoundingClientRect();
   const ghost = card.cloneNode(true);
   ghost.classList.add("card-drag-ghost");
@@ -1516,14 +1540,14 @@ function moveDragGhost(clientX, clientY) {
   if (!ghost) return;
   const x = clientX - dragState.ghostOffsetX;
   const y = clientY - dragState.ghostOffsetY;
-  ghost.style.transform = `translate(${x}px, ${y}px) rotate(2.5deg)`;
+  ghost.style.transform = `translate(${x}px, ${y}px) scale(1.04)`;
 }
 
 function removeDragGhost() {
   if (dragState?.ghost) {
-    dragState.ghost.remove();
     dragState.ghost = null;
   }
+  document.querySelectorAll(".card-drag-ghost").forEach((el) => el.remove());
 }
 
 function getDropTargetAt(clientX, clientY) {
@@ -1531,7 +1555,12 @@ function getDropTargetAt(clientX, clientY) {
   let card = null;
   let column = null;
   for (const el of stack) {
-    if (!card && el.classList?.contains("card") && !el.classList.contains("is-drag-source")) {
+    if (
+      !card &&
+      el.classList?.contains("card") &&
+      !el.classList.contains("is-drag-source") &&
+      !el.classList.contains("card-drag-ghost")
+    ) {
       card = el;
     }
     if (!column && el.classList?.contains("column")) {
@@ -1559,27 +1588,51 @@ function getDropTargetAt(clientX, clientY) {
 function updateDropIndicators(target) {
   clearDropIndicators();
   if (!target) return;
+  // Highlight the whole placeholder the card is currently hovering over.
+  const body = document.querySelector(`.column[data-stage="${target.stage}"] .column-body`);
+  if (body) body.classList.add("is-drop-active");
+  // Plus a precise insertion line when hovering over an existing card.
   if (target.indicatorCard) {
     target.indicatorCard.classList.add(target.before ? "drop-before" : "drop-after");
-  } else {
-    const body = document.querySelector(`.column[data-stage="${target.stage}"] .column-body`);
-    if (body) body.classList.add("drop-target");
   }
+}
+
+/**
+ * Returns a signed scroll delta that grows smoothly the deeper the pointer sits
+ * inside an edge zone (0 in the middle, up to ±DRAG_SCROLL_SPEED at the very edge).
+ */
+function edgeScrollDelta(pos, min, max) {
+  const zone = DRAG_SCROLL_EDGE;
+  if (pos < min + zone) {
+    const factor = Math.min(1, (min + zone - pos) / zone);
+    return -DRAG_SCROLL_SPEED * factor * factor;
+  }
+  if (pos > max - zone) {
+    const factor = Math.min(1, (pos - (max - zone)) / zone);
+    return DRAG_SCROLL_SPEED * factor * factor;
+  }
+  return 0;
 }
 
 function autoScrollDuringDrag(clientX, clientY) {
   if (!dragState?.activated) return;
 
   const boardRect = boardEl.getBoundingClientRect();
-  if (clientX > boardRect.right - DRAG_SCROLL_EDGE) boardEl.scrollLeft += DRAG_SCROLL_SPEED;
-  else if (clientX < boardRect.left + DRAG_SCROLL_EDGE) boardEl.scrollLeft -= DRAG_SCROLL_SPEED;
+  const dx = edgeScrollDelta(clientX, boardRect.left, boardRect.right);
+  if (dx) boardEl.scrollLeft += dx;
 
+  // Vertical scroll on whichever column body the pointer is currently over.
   const stack = document.elementsFromPoint(clientX, clientY);
   const body = stack.find((el) => el.classList?.contains("column-body"));
   if (body) {
     const rect = body.getBoundingClientRect();
-    if (clientY > rect.bottom - DRAG_SCROLL_EDGE) body.scrollTop += DRAG_SCROLL_SPEED;
-    else if (clientY < rect.top + DRAG_SCROLL_EDGE) body.scrollTop -= DRAG_SCROLL_SPEED;
+    const dy = edgeScrollDelta(clientY, rect.top, rect.bottom);
+    if (dy) body.scrollTop += dy;
+  }
+
+  if (dx || body) {
+    moveDragGhost(dragState.lastX, dragState.lastY);
+    updateDropIndicators(getDropTargetAt(dragState.lastX, dragState.lastY));
   }
 
   dragState.scrollRaf = requestAnimationFrame(() => {
@@ -2151,10 +2204,9 @@ document.addEventListener(
       e.preventDefault();
       return;
     }
-    if (
-      dragState &&
-      (dragState.activated || dragState.sourceEl?.classList.contains("is-drag-pending"))
-    ) {
+    // Only hijack the gesture once a drag is actually active. Before that, let the
+    // browser scroll normally — a scroll gesture cancels the pending long-press.
+    if (dragState && dragState.activated) {
       e.preventDefault();
     }
   },
