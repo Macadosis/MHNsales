@@ -374,6 +374,10 @@ function loadDeals() {
 }
 
 function saveDeals() {
+  // Ignore stale realtime echoes while our write is in flight, so a just-dropped
+  // card isn't immediately snapped back to its old stage.
+  suppressRemoteRefreshUntil = Date.now() + 1500;
+  pendingRemoteRefresh = false;
   const api = window.MHN_DB;
   if (api?.saveDealsAsync) {
     api.saveDealsAsync(deals).then((result) => {
@@ -426,10 +430,12 @@ function showCloudReadOnlyBanner() {
 
 let lastRenderedSignature = null;
 let pendingRemoteRefresh = false;
+let suppressRemoteRefreshUntil = 0;
 
 async function refreshDealsFromRemote() {
   const api = window.MHN_DB;
   if (!api?.isRemote || !api.loadDealsAsync) return;
+  if (Date.now() < suppressRemoteRefreshUntil) return;
   // Never rebuild the board mid-drag; queue the update until the drag ends.
   if (dragState) {
     pendingRemoteRefresh = true;
@@ -1184,7 +1190,78 @@ function renderBoard() {
   for (const stage of STAGES) {
     boardEl.appendChild(renderColumn(stage, visibleDeals));
   }
+  // Wait for layout so we only enable vertical scroll when cards actually overflow.
+  requestAnimationFrame(() => {
+    syncColumnBodyScrolling();
+    requestAnimationFrame(syncColumnBodyScrolling);
+  });
 }
+
+/** Enable overflow scroll on a column body only when its cards don't fit. */
+function syncColumnBodyScrolling() {
+  boardEl.querySelectorAll(".column-body").forEach((body) => {
+    // Clear inline overflow so class-based CSS can take over cleanly.
+    body.style.overflowY = "";
+    const canScroll = body.scrollHeight > body.clientHeight + 1;
+    body.classList.toggle("is-scrollable", canScroll);
+    if (!canScroll) body.scrollTop = 0;
+  });
+}
+
+window.addEventListener("resize", () => {
+  if (activeTab === "board") syncColumnBodyScrolling();
+});
+
+/* ------------------------------ Touch overscroll guard (iOS) ---- */
+
+let touchScrollGuard = null;
+
+function columnBodyCanScroll(body, dy) {
+  if (!body?.classList.contains("is-scrollable")) return false;
+  const atTop = body.scrollTop <= 0;
+  const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
+  if (dy > 0 && atTop) return false;
+  if (dy < 0 && atBottom) return false;
+  return true;
+}
+
+document.addEventListener(
+  "touchstart",
+  (e) => {
+    if (e.touches.length !== 1) {
+      touchScrollGuard = null;
+      return;
+    }
+    const t = e.touches[0];
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const body = el?.closest?.(".column-body") || null;
+    const board = el?.closest?.(".board") || null;
+    touchScrollGuard = {
+      x: t.clientX,
+      y: t.clientY,
+      body,
+      board,
+      scrollable: Boolean(body?.classList.contains("is-scrollable")),
+    };
+  },
+  { passive: true, capture: true }
+);
+
+document.addEventListener(
+  "touchend",
+  () => {
+    touchScrollGuard = null;
+  },
+  { passive: true, capture: true }
+);
+
+document.addEventListener(
+  "touchcancel",
+  () => {
+    touchScrollGuard = null;
+  },
+  { passive: true, capture: true }
+);
 
 function getPipelineDeals() {
   return getFilteredDeals().filter(
@@ -1570,20 +1647,32 @@ function removeDragGhost() {
 }
 
 function getDropTargetAt(clientX, clientY) {
+  // Hide the floating ghost so it can't steal hit-testing (Safari can still
+  // report pointer-events:none clones under elementsFromPoint in some cases).
+  const ghost = dragState?.ghost;
+  const prevVisibility = ghost ? ghost.style.visibility : "";
+  if (ghost) ghost.style.visibility = "hidden";
+
   const stack = document.elementsFromPoint(clientX, clientY);
+  if (ghost) ghost.style.visibility = prevVisibility;
+
   let card = null;
   let column = null;
   for (const el of stack) {
+    if (el.classList?.contains("card-drag-ghost")) continue;
+    if (el.closest?.(".card-drag-ghost")) continue;
     if (
       !card &&
       el.classList?.contains("card") &&
-      !el.classList.contains("is-drag-source") &&
-      !el.classList.contains("card-drag-ghost")
+      !el.classList.contains("is-drag-source")
     ) {
       card = el;
     }
     if (!column && el.classList?.contains("column")) {
       column = el;
+    }
+    if (!column && el.classList?.contains("column-body")) {
+      column = el.closest(".column");
     }
     if (card && column) break;
   }
@@ -1606,6 +1695,7 @@ function getDropTargetAt(clientX, clientY) {
 
 function updateDropIndicators(target) {
   clearDropIndicators();
+  if (dragState) dragState.dropTarget = target || null;
   if (!target) return;
   // Highlight the whole placeholder the card is currently hovering over.
   const body = document.querySelector(`.column[data-stage="${target.stage}"] .column-body`);
@@ -1686,8 +1776,9 @@ function commitDragDrop(clientX, clientY) {
   const deal = deals.find((d) => d.id === dragState.dealId);
   if (!deal) return;
 
-  const target = getDropTargetAt(clientX, clientY);
-  if (!target) return;
+  // Prefer the last highlighted target (what the user saw), then re-probe.
+  const target = dragState.dropTarget || getDropTargetAt(clientX, clientY);
+  if (!target?.stage) return;
 
   if (target.stage === "committed" && deal.stage !== "committed") {
     openCommitModal(deal);
@@ -1722,6 +1813,8 @@ function attachCardPointerDrag(card, deal) {
       sourceEl: card,
       timer: null,
       scrollRaf: null,
+      dropTarget: null,
+      ghost: null,
     };
 
     const isTouch = dragState.pointerType === "touch" || dragState.pointerType === "pen";
@@ -1755,8 +1848,12 @@ document.addEventListener("pointermove", (e) => {
 
 document.addEventListener("pointerup", (e) => {
   if (!dragState || e.pointerId !== dragState.pointerId) return;
-  const { lastX, lastY, activated, sourceEl } = dragState;
-  if (activated) commitDragDrop(lastX, lastY);
+  const { activated, sourceEl } = dragState;
+  const x = Number.isFinite(e.clientX) ? e.clientX : dragState.lastX;
+  const y = Number.isFinite(e.clientY) ? e.clientY : dragState.lastY;
+  dragState.lastX = x;
+  dragState.lastY = y;
+  if (activated) commitDragDrop(x, y);
   cleanupDrag();
   if (activated && sourceEl) {
     sourceEl.dataset.suppressClick = "1";
@@ -2212,7 +2309,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
   });
 });
 
-/* Prevent pinch-zoom; also keep iOS from scrolling away during card long-press/drag */
+/* Prevent pinch-zoom, card-drag scroll theft, and iOS rubber-band bounce */
 document.addEventListener("gesturestart", (e) => e.preventDefault());
 document.addEventListener("gesturechange", (e) => e.preventDefault());
 document.addEventListener("gestureend", (e) => e.preventDefault());
@@ -2223,14 +2320,43 @@ document.addEventListener(
       e.preventDefault();
       return;
     }
-    // Only hijack the gesture once a drag is actually active. Before that, let the
-    // browser scroll normally — a scroll gesture cancels the pending long-press.
     if (dragState && dragState.activated) {
       e.preventDefault();
+      return;
     }
+    if (!touchScrollGuard || e.touches.length !== 1) return;
+
+    const t = e.touches[0];
+    const dx = t.clientX - touchScrollGuard.x;
+    const dy = t.clientY - touchScrollGuard.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    // Clearly horizontal — allow board / toolbar panning.
+    if (absX > absY && absX > 8) return;
+
+    // Vertical (or ambiguous) gesture: only allow real column-card scrolling.
+    if (columnBodyCanScroll(touchScrollGuard.body, dy)) return;
+
+    // Empty placeholder, column chrome, board padding, scroll edges, etc.
+    e.preventDefault();
   },
-  { passive: false }
+  { passive: false, capture: true }
 );
+
+// Desktop trackpad / wheel: never bounce empty columns or the board vertically.
+if (boardEl) {
+  boardEl.addEventListener(
+    "wheel",
+    (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // horizontal wheel ok
+      const body = e.target.closest?.(".column-body");
+      if (columnBodyCanScroll(body, -e.deltaY)) return;
+      e.preventDefault();
+    },
+    { passive: false }
+  );
+}
 
 document.getElementById("pipelinePrevBtn").addEventListener("click", () => {
   shiftPipelinePeriod(-pipelineState.periodMonths);

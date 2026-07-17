@@ -719,9 +719,11 @@ main {
   gap: 16px;
   padding: 16px 28px 28px;
   overflow-x: auto;
-  overscroll-behavior: contain;
+  overflow-y: hidden; /* stop iOS vertical rubber-band on the board */
+  overscroll-behavior: none;
   min-height: 0;
   align-items: stretch;
+  touch-action: pan-x;
 }
 
 .column {
@@ -732,6 +734,8 @@ main {
   border-radius: var(--radius-lg);
   min-height: 0;
   min-width: 230px;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .column-header {
@@ -781,8 +785,19 @@ main {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  overflow-y: auto;
+  overflow: hidden;
+  overscroll-behavior: none;
   min-height: 80px;
+  /* Empty / short columns: horizontal board pan only — no vertical bounce */
+  touch-action: pan-x;
+}
+
+.column-body.is-scrollable {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  /* Avoid -webkit-overflow-scrolling: touch — it encourages iOS rubber-banding */
+  touch-action: pan-y;
 }
 
 .column.drag-over .column-body {
@@ -824,12 +839,16 @@ main {
   cursor: grab;
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
-  /* Allow the page/column to scroll when a touch starts on a card; a still hold
-     activates drag, while a scrolling gesture cancels the pending long-press. */
-  touch-action: pan-x pan-y;
+  /* Default: no vertical pan (prevents empty-column / board rubber-band). */
+  touch-action: pan-x;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* Only when the column actually overflows do cards allow vertical scrolling */
+.column-body.is-scrollable .card {
+  touch-action: pan-x pan-y;
 }
 
 .card:hover {
@@ -863,13 +882,17 @@ main {
   top: 0;
   z-index: 1000;
   margin: 0;
-  pointer-events: none;
+  pointer-events: none !important;
   opacity: 0.97;
   box-shadow: var(--shadow-lift);
   border-color: var(--accent);
   cursor: grabbing;
   will-change: transform;
   transition: none;
+}
+
+.card-drag-ghost * {
+  pointer-events: none !important;
 }
 
 .card.drop-before {
@@ -981,6 +1004,11 @@ body.is-card-dragging .card {
   padding: 18px 8px;
   border: 1px dashed var(--line);
   border-radius: var(--radius-md);
+  touch-action: pan-x;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* --------------------------- Pipeline view --------------------- */
