@@ -14,6 +14,8 @@ const FILTER_FIELDS = [
   { key: "tool", label: "Tool" },
 ];
 
+const INCOMPLETE_FILTER = "__incomplete__";
+
 const STORAGE_KEY = "mhn-sales-deals";
 const DEFAULT_VALUE = 10000;
 const MS_DAY = 86400000;
@@ -160,6 +162,17 @@ async function refreshDealsFromRemote() {
   }
 }
 
+const DEAL_CREATION_NOTE_TEXT = "Deal card created";
+
+function makeDealCreationNote(timestamp) {
+  return {
+    id: crypto.randomUUID(),
+    text: DEAL_CREATION_NOTE_TEXT,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 function migrateDeals({ persist = true } = {}) {
   let changed = false;
   for (const deal of deals) {
@@ -174,6 +187,16 @@ function migrateDeals({ persist = true } = {}) {
       const normalized = startOfDay(new Date(deal.committedAt)).getTime();
       if (normalized !== deal.committedAt) {
         deal.committedAt = normalized;
+        changed = true;
+      }
+    }
+
+    // Every deal keeps an automatic first note stamped at its creation time.
+    const created = deal.createdAt;
+    if (created) {
+      const notes = deal.notes || [];
+      if (!notes.some((note) => note.createdAt === created)) {
+        deal.notes = [makeDealCreationNote(created), ...notes];
         changed = true;
       }
     }
@@ -245,6 +268,10 @@ function getFilterOptions(key) {
       .map((deal) => (deal[key] || "").trim())
       .filter(Boolean)
   )].sort((a, b) => a.localeCompare(b));
+}
+
+function hasIncompleteValues(key) {
+  return getActiveDeals().some((deal) => !(deal[key] || "").trim());
 }
 
 function getActiveDeals() {
@@ -437,7 +464,9 @@ function matchesFilters(deal) {
   return FILTER_FIELDS.every(({ key }) => {
     const selected = filters[key];
     if (selected.size === 0) return true;
-    return selected.has((deal[key] || "").trim());
+    const value = (deal[key] || "").trim();
+    if (!value) return selected.has(INCOMPLETE_FILTER);
+    return selected.has(value);
   });
 }
 
@@ -469,6 +498,9 @@ function closeFilterMenus() {
   });
   document.querySelectorAll(".filter-trigger").forEach((trigger) => {
     trigger.classList.remove("is-open");
+  });
+  document.querySelectorAll(".toolbar-scroll").forEach((row) => {
+    row.classList.remove("is-menu-open");
   });
 }
 
@@ -504,12 +536,34 @@ function renderFilters(containerEl, clearBtn) {
     menu.className = "filter-menu";
     menu.hidden = openFilterKey !== key;
 
-    if (options.length === 0) {
+    const showIncomplete =
+      hasIncompleteValues(key) || filters[key].has(INCOMPLETE_FILTER);
+
+    if (options.length === 0 && !showIncomplete) {
       const empty = document.createElement("div");
       empty.className = "filter-empty";
       empty.textContent = `No ${label.toLowerCase()} values yet`;
       menu.appendChild(empty);
     } else {
+      if (showIncomplete) {
+        const optionLabel = document.createElement("label");
+        optionLabel.className = "filter-option filter-option-incomplete";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = filters[key].has(INCOMPLETE_FILTER);
+
+        const text = document.createElement("span");
+        text.textContent = "Incomplete";
+
+        checkbox.addEventListener("change", () => {
+          toggleFilterValue(key, INCOMPLETE_FILTER, checkbox.checked);
+        });
+
+        optionLabel.append(checkbox, text);
+        menu.appendChild(optionLabel);
+      }
+
       for (const option of options) {
         const optionLabel = document.createElement("label");
         optionLabel.className = "filter-option";
@@ -543,6 +597,10 @@ function renderFilters(containerEl, clearBtn) {
   }
 
   clearBtn.hidden = !hasActiveFilters();
+  const scrollRow = containerEl.closest(".toolbar-scroll");
+  if (scrollRow) {
+    scrollRow.classList.toggle("is-menu-open", openFilterKey !== null);
+  }
 }
 
 document.addEventListener("click", closeFilterMenus);
@@ -1344,8 +1402,24 @@ historySearchInput.addEventListener("input", () => {
 
 function permanentlyDeleteDeal() {
   if (!editingId) return;
-  deals = deals.filter((d) => d.id !== editingId);
-  saveDeals();
+  const id = editingId;
+  deals = deals.filter((d) => d.id !== id);
+
+  const api = window.MHN_DB;
+  // Keep local cache in sync
+  if (api?.saveDealsAsync) {
+    api.saveDealsAsync(deals).catch((err) => console.error(err));
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
+  }
+  // Explicit single-row cloud delete (never a full-table replace)
+  if (api?.deleteDealAsync) {
+    api.deleteDealAsync(id).catch((err) => {
+      console.error(err);
+      showSyncStatus("Could not delete deal from cloud", true);
+    });
+  }
+
   render();
   closeDismissModal();
   closeModal();
@@ -1386,11 +1460,13 @@ form.addEventListener("submit", (e) => {
       deal.implementationDays = days;
     }
   } else {
+    const createdAt = Date.now();
     deals.push({
       id: crypto.randomUUID(),
       stage: createStage,
-      createdAt: Date.now(),
+      createdAt,
       ...data,
+      notes: [makeDealCreationNote(createdAt), ...(data.notes || [])],
     });
   }
 
@@ -1426,6 +1502,42 @@ document.addEventListener("keydown", (e) => {
 
 /* ------------------------------ Tabs ---------------------------- */
 
+const navShell = document.getElementById("navShell");
+const navBurgerBtn = document.getElementById("navBurgerBtn");
+
+function closeNavMenu() {
+  if (!navShell) return;
+  navShell.classList.remove("is-open");
+  if (navBurgerBtn) {
+    navBurgerBtn.setAttribute("aria-expanded", "false");
+    navBurgerBtn.setAttribute("aria-label", "Open navigation menu");
+  }
+}
+
+function toggleNavMenu() {
+  if (!navShell || !navBurgerBtn) return;
+  const willOpen = !navShell.classList.contains("is-open");
+  navShell.classList.toggle("is-open", willOpen);
+  navBurgerBtn.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  navBurgerBtn.setAttribute("aria-label", willOpen ? "Close navigation menu" : "Open navigation menu");
+}
+
+if (navBurgerBtn) {
+  navBurgerBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleNavMenu();
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if (!navShell || !navShell.classList.contains("is-open")) return;
+  if (!navShell.contains(e.target)) closeNavMenu();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && navShell?.classList.contains("is-open")) closeNavMenu();
+});
+
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     activeTab = tab.dataset.tab;
@@ -1436,9 +1548,22 @@ document.querySelectorAll(".tab").forEach((tab) => {
     document.querySelectorAll(".view").forEach((v) => {
       v.hidden = v.id !== `view-${activeTab}`;
     });
+    closeNavMenu();
     render();
   });
 });
+
+/* Prevent pinch-zoom gestures on touch devices */
+document.addEventListener("gesturestart", (e) => e.preventDefault());
+document.addEventListener("gesturechange", (e) => e.preventDefault());
+document.addEventListener("gestureend", (e) => e.preventDefault());
+document.addEventListener(
+  "touchmove",
+  (e) => {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  },
+  { passive: false }
+);
 
 document.getElementById("pipelinePrevBtn").addEventListener("click", () => {
   shiftPipelinePeriod(-pipelineState.periodMonths);
@@ -1454,16 +1579,17 @@ pipelinePeriodLength.addEventListener("change", () => {
 async function bootstrap() {
   const api = window.MHN_DB;
 
-  if (api?.isRemote && !api.cloudWriteEnabled) {
+  // Banner based on origin, even before hydration
+  if (api?.isRemote && api.cloudWriteAllowedByOrigin === false) {
     showCloudReadOnlyBanner();
   }
 
   if (api?.loadDealsAsync) {
     try {
       deals = await api.loadDealsAsync();
-      if (api.isRemote && api.cloudWriteEnabled) {
+      if (api.isRemote && api.cloudWriteAllowedByOrigin) {
         showSyncStatus("Synced with Supabase");
-      } else if (api.isRemote && !api.cloudWriteEnabled) {
+      } else if (api.isRemote && !api.cloudWriteAllowedByOrigin) {
         showSyncStatus("Cloud read-only — local edits won’t upload", false, true);
       }
     } catch (err) {
@@ -1475,7 +1601,7 @@ async function bootstrap() {
     deals = loadDeals();
   }
 
-  // Persist migrate fixes only on the deployed write-enabled origin
+  // Persist migrate fixes only when origin allows writes AND cloud is hydrated
   migrateDeals({ persist: Boolean(api?.cloudWriteEnabled) });
   initPipelinePeriod();
   render();

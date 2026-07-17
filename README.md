@@ -16,10 +16,15 @@ Only the **GitHub Pages** app (`*.github.io`) can write to Supabase.
 
 | Origin | Read cloud | Write cloud |
 |--------|------------|-------------|
-| `https://macadosis.github.io/MHNsales/` | yes | **yes** |
+| `https://macadosis.github.io/MHNsales/` | yes | **yes** (after load) |
 | `localhost` / `file://` / Desktop | yes | **no** |
 
-Use the deployed URL for real sales data. Local copies are for UI/preview only and cannot overwrite production.
+Additional safeguards:
+- Saves **upsert** deals only — they never mass-delete other cloud rows
+- Cloud writes are refused until a successful Supabase load in that session
+- Permanent delete removes a single deal by id
+
+Use the deployed URL for real sales data. Local copies are for UI/preview only.
 
 ## Setup
 

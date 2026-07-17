@@ -1,8 +1,11 @@
 /* MHN Sales — Supabase data layer
  *
- * Cloud WRITE is only allowed on GitHub Pages (*.github.io).
- * file://, localhost, and other hosts can still READ from Supabase
- * but never upsert / delete / migrate local data into the cloud.
+ * Safety rules:
+ * 1) Cloud WRITE only on GitHub Pages (*.github.io) — not file:// or localhost.
+ * 2) Never "replace all rows" / mass-delete orphans from a local snapshot.
+ *    Saves upsert deals; permanent delete removes one id only.
+ * 3) No cloud writes until this session has successfully loaded from Supabase
+ *    (prevents empty/stale localStorage from wiping production).
  */
 
 const LOCAL_STORAGE_KEY = "mhn-sales-deals";
@@ -32,7 +35,8 @@ function canWriteToCloud() {
 }
 
 const db = getSupabaseClient();
-const cloudWriteEnabled = Boolean(db) && canWriteToCloud();
+const cloudWriteAllowedByOrigin = Boolean(db) && canWriteToCloud();
+let cloudHydrated = false; // true only after a successful remote fetch this session
 
 function msToIso(ms) {
   if (ms == null || ms === "") return null;
@@ -100,82 +104,113 @@ function saveLocalDeals(deals) {
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(deals));
 }
 
+function assertCloudWriteAllowed() {
+  if (!cloudWriteAllowedByOrigin) {
+    throw new Error("Cloud writes are blocked on this origin");
+  }
+  if (!cloudHydrated) {
+    throw new Error("Cloud writes blocked until remote data has loaded");
+  }
+}
+
 async function fetchRemoteDeals() {
   const { data, error } = await db.from("deals").select("*").order("created_at", { ascending: true });
   if (error) throw error;
+  cloudHydrated = true;
   return (data || []).map(rowToDeal);
 }
 
-async function syncDealsToRemote(deals) {
-  if (!cloudWriteEnabled) {
-    throw new Error("Cloud writes are blocked on this origin");
-  }
-
+/** Upsert deals only — never deletes other cloud rows. */
+async function upsertDealsToRemote(deals) {
+  assertCloudWriteAllowed();
+  if (!deals.length) return;
   const rows = deals.map(dealToRow);
-  if (rows.length) {
-    const { error: upsertError } = await db.from("deals").upsert(rows, { onConflict: "id" });
-    if (upsertError) throw upsertError;
-  }
-
-  const { data: existing, error: listError } = await db.from("deals").select("id");
-  if (listError) throw listError;
-
-  const keep = new Set(deals.map((d) => d.id));
-  const toDelete = (existing || []).map((r) => r.id).filter((id) => !keep.has(id));
-  if (toDelete.length) {
-    const { error: deleteError } = await db.from("deals").delete().in("id", toDelete);
-    if (deleteError) throw deleteError;
-  }
+  const { error } = await db.from("deals").upsert(rows, { onConflict: "id" });
+  if (error) throw error;
 }
 
-/** One-time seed: local → remote only when cloud is empty AND writes are allowed. */
+async function deleteDealFromRemote(id) {
+  assertCloudWriteAllowed();
+  if (!id) return;
+  const { error } = await db.from("deals").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/**
+ * First-time seed only: if cloud is empty and we're on Pages, upload local cache.
+ * Does not delete anything.
+ */
 async function migrateLocalToRemoteIfNeeded() {
   const remote = await fetchRemoteDeals();
   if (remote.length) return remote;
 
-  if (!cloudWriteEnabled) return remote;
+  if (!cloudWriteAllowedByOrigin) return remote;
 
   const local = loadLocalDeals();
   if (!local.length) return [];
 
-  await syncDealsToRemote(local);
+  // Hydrated (empty remote is a valid load). Safe to seed without orphan deletes.
+  await upsertDealsToRemote(local);
   return local;
 }
 
-/** Load deals from Supabase (or localStorage fallback). Never pushes local→cloud when write-blocked. */
 async function loadDealsAsync() {
   if (!db) {
     console.warn("Supabase not configured — using localStorage only. Fill in config.js.");
+    cloudHydrated = false;
     return loadLocalDeals();
   }
   try {
-    if (cloudWriteEnabled) {
-      return await migrateLocalToRemoteIfNeeded();
+    if (cloudWriteAllowedByOrigin) {
+      const deals = await migrateLocalToRemoteIfNeeded();
+      // Refresh local cache from cloud so Pages doesn't keep a stale snapshot
+      saveLocalDeals(deals);
+      return deals;
     }
-    // Read-only origins: pull cloud data only — never upload local cache
-    return await fetchRemoteDeals();
+    const remote = await fetchRemoteDeals();
+    return remote;
   } catch (err) {
     console.error("Failed to load from Supabase, falling back to localStorage:", err);
+    cloudHydrated = false; // refuse cloud writes this session
     return loadLocalDeals();
   }
 }
 
 /**
  * Persist deals.
- * - Always mirrors to localStorage (per-origin cache).
- * - Writes to Supabase only on allowed origins (*.github.io).
+ * - Always mirrors to localStorage (per-origin).
+ * - On Pages: upserts to Supabase only after a successful remote load.
+ * - Never mass-deletes cloud rows.
  */
 async function saveDealsAsync(deals) {
   saveLocalDeals(deals);
   if (!db) return { wroteToCloud: false };
-  if (!cloudWriteEnabled) {
+  if (!cloudWriteAllowedByOrigin) {
     return { wroteToCloud: false, writeBlocked: true };
   }
+  if (!cloudHydrated) {
+    console.warn("Skipping cloud save — remote data not hydrated yet");
+    return { wroteToCloud: false, writeBlocked: true, reason: "not-hydrated" };
+  }
   try {
-    await syncDealsToRemote(deals);
+    await upsertDealsToRemote(deals);
     return { wroteToCloud: true };
   } catch (err) {
     console.error("Failed to save to Supabase:", err);
+    throw err;
+  }
+}
+
+async function deleteDealAsync(id) {
+  if (!db) return { wroteToCloud: false };
+  if (!cloudWriteAllowedByOrigin || !cloudHydrated) {
+    return { wroteToCloud: false, writeBlocked: true };
+  }
+  try {
+    await deleteDealFromRemote(id);
+    return { wroteToCloud: true };
+  } catch (err) {
+    console.error("Failed to delete deal from Supabase:", err);
     throw err;
   }
 }
@@ -199,8 +234,14 @@ function subscribeToDealChanges(onChange) {
 
 window.MHN_DB = {
   isRemote: Boolean(db),
-  cloudWriteEnabled,
+  get cloudWriteEnabled() {
+    return cloudWriteAllowedByOrigin && cloudHydrated;
+  },
+  get cloudWriteAllowedByOrigin() {
+    return cloudWriteAllowedByOrigin;
+  },
   loadDealsAsync,
   saveDealsAsync,
+  deleteDealAsync,
   subscribeToDealChanges,
 };
