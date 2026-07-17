@@ -300,7 +300,28 @@ body {
   display: flex;
   flex: 1;
   align-items: center;
+  gap: 10px;
   min-width: 0;
+}
+
+.nav-user-name {
+  display: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 112px;
+  min-width: 0;
+}
+
+.nav-user-name[hidden] {
+  display: none !important;
+}
+
+.nav-menu-logout {
+  display: none;
 }
 
 .nav-burger {
@@ -1845,27 +1866,22 @@ body.is-card-dragging .card {
     margin-left: auto;
   }
 
+  .nav-user-name:not([hidden]) {
+    display: block;
+  }
+
   .topbar-actions {
     margin-left: 0;
     gap: 8px;
   }
 
   .user-chip {
-    max-width: 128px;
-    padding: 3px 3px 3px 10px;
-  }
-
-  .user-chip-label {
-    font-size: 12px;
-  }
-
-  .user-chip-logout {
-    padding: 5px 8px;
-    font-size: 11px;
+    display: none !important;
   }
 
   .nav-burger {
     display: inline-flex;
+    margin-left: 0;
   }
 
   .nav-shell.is-open .nav-burger {
@@ -1899,6 +1915,28 @@ body.is-card-dragging .card {
     text-align: left;
     border-radius: var(--radius-sm);
     padding: 10px 12px;
+  }
+
+  .nav-menu-logout {
+    display: block;
+    appearance: none;
+    width: 100%;
+    margin-top: 4px;
+    padding: 10px 12px;
+    border: none;
+    border-top: 1px solid var(--line);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    background: transparent;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--danger);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .nav-menu-logout:hover {
+    background: #f7e8e5;
   }
 
   .new-deal-btn {

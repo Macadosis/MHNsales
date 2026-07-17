@@ -198,15 +198,25 @@ function showAppShell() {
 
 function updateUserChip() {
   const name = getCurrentUserName();
+  const navUserName = document.getElementById("navUserName");
   if (!name) {
     userChip.hidden = true;
+    if (navUserName) {
+      navUserName.hidden = true;
+      navUserName.textContent = "";
+      navUserName.removeAttribute("title");
+    }
     return;
   }
+  const title = currentUser?.email ? `${name} (${currentUser.email})` : name;
   userChipName.textContent = name;
-  userChipName.title = currentUser?.email
-    ? `${name} (${currentUser.email})`
-    : name;
+  userChipName.title = title;
   userChip.hidden = false;
+  if (navUserName) {
+    navUserName.textContent = name;
+    navUserName.title = title;
+    navUserName.hidden = false;
+  }
 }
 
 function applyAuthUser(user) {
@@ -2183,6 +2193,10 @@ authModeSignupBtn.addEventListener("click", () => setAuthMode("signup"));
 loginForm.addEventListener("submit", handleLoginSubmit);
 signupForm.addEventListener("submit", handleSignupSubmit);
 logoutBtn.addEventListener("click", () => {
+  logout();
+});
+document.getElementById("logoutMenuBtn")?.addEventListener("click", () => {
+  closeNavMenu();
   logout();
 });
 
