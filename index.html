@@ -164,7 +164,11 @@
       </div>
       <button class="btn btn-primary new-deal-btn" id="newDealBtn" aria-label="New deal">
         <span class="new-deal-label">New deal</span>
-        <span class="new-deal-icon" aria-hidden="true">+</span>
+        <span class="new-deal-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+          </svg>
+        </span>
       </button>
     </div>
   </header>
@@ -174,13 +178,15 @@
       <div class="board-toolbar" id="boardToolbar">
         <div class="toolbar-scroll">
           <div class="filters" id="filters"></div>
-          <div class="search-bubble" id="searchBubble">
-            <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
-              <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-            <input type="search" id="searchInput" class="search-input" placeholder="Search deals" aria-label="Search deals by name" autocomplete="off" />
-            <button type="button" class="search-clear" id="searchClearBtn" aria-label="Clear search" hidden>&times;</button>
+          <div class="search-anchor">
+            <div class="search-bubble" id="searchBubble">
+              <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+                <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <input type="search" id="searchInput" class="search-input" placeholder="Search deals" aria-label="Search deals by name" autocomplete="off" />
+              <button type="button" class="search-clear" id="searchClearBtn" aria-label="Clear search" hidden>&times;</button>
+            </div>
           </div>
           <button class="btn btn-ghost btn-sm" id="clearFiltersBtn" hidden>Clear filters</button>
         </div>

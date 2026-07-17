@@ -45,6 +45,7 @@
 html, body {
   margin: 0;
   height: 100%;
+  height: 100dvh;
   touch-action: manipulation;
   -ms-touch-action: manipulation;
 }
@@ -512,6 +513,12 @@ main {
   flex-shrink: 0;
 }
 
+.search-anchor {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
 .search-bubble {
   display: inline-flex;
   align-items: center;
@@ -799,8 +806,9 @@ main {
   padding: 12px 14px;
   cursor: grab;
   box-shadow: var(--shadow-card);
-  transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
-  touch-action: manipulation;
+  transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  /* Prevent the browser from stealing the gesture for scroll/zoom before long-press activates */
+  touch-action: none;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -812,10 +820,17 @@ main {
   transform: translateY(-1px);
 }
 
+.card.is-drag-pending {
+  transform: scale(1.02);
+  box-shadow: var(--shadow-lift);
+  border-color: var(--accent);
+}
+
 .card.dragging,
 .card.is-drag-source {
   opacity: 0.45;
   cursor: grabbing;
+  transform: scale(1.03);
 }
 
 .card.drop-before {
@@ -1852,8 +1867,8 @@ body.is-card-dragging .card {
 
 @media (max-width: 720px) {
   .topbar {
-    gap: 12px;
-    padding: 12px 16px;
+    gap: 8px;
+    padding: 12px 10px 12px 16px;
   }
 
   .brand-name {
@@ -1864,6 +1879,11 @@ body.is-card-dragging .card {
     flex: 0 0 auto;
     position: relative;
     margin-left: auto;
+    gap: 8px;
+  }
+
+  .nav-user-name {
+    max-width: 96px;
   }
 
   .nav-user-name:not([hidden]) {
@@ -1871,8 +1891,13 @@ body.is-card-dragging .card {
   }
 
   .topbar-actions {
-    margin-left: 0;
-    gap: 8px;
+    /* FAB is fixed; keep this out of the flex flow so the burger sits on the right edge */
+    width: 0;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    gap: 0;
   }
 
   .user-chip {
@@ -1941,8 +1966,8 @@ body.is-card-dragging .card {
 
   .new-deal-btn {
     position: fixed;
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(20px, env(safe-area-inset-bottom));
+    right: max(28px, calc(env(safe-area-inset-right) + 18px));
+    bottom: max(36px, calc(env(safe-area-inset-bottom) + 24px));
     z-index: 35;
     width: 56px;
     height: 56px;
@@ -1951,6 +1976,7 @@ body.is-card-dragging .card {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    line-height: 0;
     box-shadow: var(--shadow-lift);
   }
 
@@ -1959,10 +1985,84 @@ body.is-card-dragging .card {
   }
 
   .new-deal-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    line-height: 0;
+  }
+
+  .new-deal-icon svg {
     display: block;
-    font-size: 30px;
-    line-height: 1;
-    font-weight: 400;
+  }
+
+  /* Icon-only search that expands left without shifting the filter row */
+  .search-anchor {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+  }
+
+  .search-bubble {
+    position: absolute;
+    right: 0;
+    top: 0;
+    height: 36px;
+    width: 36px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+    overflow: hidden;
+    z-index: 5;
+    transition:
+      width 0.2s ease,
+      padding 0.2s ease,
+      gap 0.2s ease,
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      background 0.15s ease;
+  }
+
+  .search-bubble .search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
+    transition: width 0.2s ease, opacity 0.15s ease;
+  }
+
+  .search-input:focus {
+    width: 0;
+  }
+
+  .search-bubble:focus-within,
+  .search-bubble.has-query {
+    width: 196px;
+    padding: 0 10px 0 34px;
+    gap: 6px;
+    justify-content: flex-start;
+  }
+
+  .search-bubble:focus-within .search-input,
+  .search-bubble.has-query .search-input {
+    width: 132px;
+    opacity: 1;
+  }
+
+  .search-bubble:focus-within .search-clear:not([hidden]),
+  .search-bubble.has-query .search-clear:not([hidden]) {
+    display: inline-flex;
   }
 
   .board-toolbar,
@@ -2003,17 +2103,19 @@ body.is-card-dragging .card {
   }
 
   main {
-    padding-bottom: 72px;
+    padding-bottom: 0;
   }
 
   .board {
     padding: 12px 16px 0;
+    min-height: 0;
   }
 
   .column {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
     border-bottom: none;
+    min-height: 100%;
   }
 }
 

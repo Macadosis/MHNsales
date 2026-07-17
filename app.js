@@ -981,6 +981,8 @@ searchClearBtn.addEventListener("click", () => {
 });
 
 function scrollSearchIntoView() {
+  // Mobile search expands left from a fixed icon slot — scrolling the toolbar causes a visible nudge.
+  if (window.matchMedia("(max-width: 720px)").matches) return;
   const row = searchBubble.closest(".toolbar-scroll");
   if (!row) return;
   const rowRect = row.getBoundingClientRect();
@@ -995,10 +997,13 @@ function scrollSearchIntoView() {
 
 searchInput.addEventListener("focus", () => {
   scrollSearchIntoView();
-  // Search field expands on focus — scroll again after the width transition
   setTimeout(scrollSearchIntoView, 220);
 });
 searchBubble.addEventListener("pointerdown", () => {
+  // Focus the input when tapping the icon-only control
+  if (document.activeElement !== searchInput) {
+    searchInput.focus();
+  }
   requestAnimationFrame(scrollSearchIntoView);
 });
 
@@ -1452,8 +1457,8 @@ function renderCard(deal) {
 
 /* ------------------------------ Drag & drop -------------------- */
 
-const DRAG_HOLD_MS = 160;
-const DRAG_MOVE_CANCEL_PX = 10;
+const DRAG_HOLD_MS = 180;
+const DRAG_MOVE_CANCEL_PX = 28;
 const DRAG_MOUSE_ACTIVATE_PX = 6;
 const DRAG_SCROLL_EDGE = 52;
 const DRAG_SCROLL_SPEED = 14;
@@ -1471,7 +1476,7 @@ function cleanupDrag() {
   if (dragState.timer) clearTimeout(dragState.timer);
   if (dragState.scrollRaf) cancelAnimationFrame(dragState.scrollRaf);
   if (dragState.sourceEl) {
-    dragState.sourceEl.classList.remove("is-drag-source", "dragging");
+    dragState.sourceEl.classList.remove("is-drag-source", "dragging", "is-drag-pending");
   }
   clearDropIndicators();
   document.body.classList.remove("is-card-dragging");
@@ -1543,10 +1548,16 @@ function autoScrollDuringDrag(clientX, clientY) {
 function activateDrag() {
   if (!dragState || dragState.activated) return;
   dragState.activated = true;
+  dragState.sourceEl.classList.remove("is-drag-pending");
   dragState.sourceEl.classList.add("is-drag-source", "dragging");
   document.body.classList.add("is-card-dragging");
   try {
     dragState.sourceEl.setPointerCapture(dragState.pointerId);
+  } catch {
+    /* ignore */
+  }
+  try {
+    navigator.vibrate?.(12);
   } catch {
     /* ignore */
   }
@@ -1580,12 +1591,13 @@ function commitDragDrop(clientX, clientY) {
 function attachCardPointerDrag(card, deal) {
   card.addEventListener("pointerdown", (e) => {
     if (e.button != null && e.button !== 0) return;
+    if (e.isPrimary === false) return;
     if (dragState) cleanupDrag();
 
     dragState = {
       dealId: deal.id,
       pointerId: e.pointerId,
-      pointerType: e.pointerType,
+      pointerType: e.pointerType || "mouse",
       startX: e.clientX,
       startY: e.clientY,
       lastX: e.clientX,
@@ -1596,7 +1608,9 @@ function attachCardPointerDrag(card, deal) {
       scrollRaf: null,
     };
 
-    if (e.pointerType === "touch" || e.pointerType === "pen") {
+    const isTouch = dragState.pointerType === "touch" || dragState.pointerType === "pen";
+    if (isTouch) {
+      card.classList.add("is-drag-pending");
       dragState.timer = setTimeout(activateDrag, DRAG_HOLD_MS);
     }
   });
@@ -1627,7 +1641,6 @@ document.addEventListener("pointerup", (e) => {
   const { lastX, lastY, activated, sourceEl } = dragState;
   if (activated) commitDragDrop(lastX, lastY);
   cleanupDrag();
-  // Keep suppressClick briefly so the synthetic click doesn't open the modal
   if (activated && sourceEl) {
     sourceEl.dataset.suppressClick = "1";
     setTimeout(() => {
@@ -2082,14 +2095,23 @@ document.querySelectorAll(".tab").forEach((tab) => {
   });
 });
 
-/* Prevent pinch-zoom gestures on touch devices */
+/* Prevent pinch-zoom; also keep iOS from scrolling away during card long-press/drag */
 document.addEventListener("gesturestart", (e) => e.preventDefault());
 document.addEventListener("gesturechange", (e) => e.preventDefault());
 document.addEventListener("gestureend", (e) => e.preventDefault());
 document.addEventListener(
   "touchmove",
   (e) => {
-    if (e.touches && e.touches.length > 1) e.preventDefault();
+    if (e.touches && e.touches.length > 1) {
+      e.preventDefault();
+      return;
+    }
+    if (
+      dragState &&
+      (dragState.activated || dragState.sourceEl?.classList.contains("is-drag-pending"))
+    ) {
+      e.preventDefault();
+    }
   },
   { passive: false }
 );
