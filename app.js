@@ -1491,9 +1491,39 @@ function cleanupDrag() {
   if (dragState.sourceEl) {
     dragState.sourceEl.classList.remove("is-drag-source", "dragging", "is-drag-pending");
   }
+  removeDragGhost();
   clearDropIndicators();
   document.body.classList.remove("is-card-dragging");
   dragState = null;
+}
+
+function createDragGhost(card, clientX, clientY) {
+  const rect = card.getBoundingClientRect();
+  const ghost = card.cloneNode(true);
+  ghost.classList.add("card-drag-ghost");
+  ghost.classList.remove("is-drag-source", "dragging", "is-drag-pending", "drop-before", "drop-after");
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.height = `${rect.height}px`;
+  document.body.appendChild(ghost);
+  dragState.ghost = ghost;
+  dragState.ghostOffsetX = clientX - rect.left;
+  dragState.ghostOffsetY = clientY - rect.top;
+  moveDragGhost(clientX, clientY);
+}
+
+function moveDragGhost(clientX, clientY) {
+  const ghost = dragState?.ghost;
+  if (!ghost) return;
+  const x = clientX - dragState.ghostOffsetX;
+  const y = clientY - dragState.ghostOffsetY;
+  ghost.style.transform = `translate(${x}px, ${y}px) rotate(2.5deg)`;
+}
+
+function removeDragGhost() {
+  if (dragState?.ghost) {
+    dragState.ghost.remove();
+    dragState.ghost = null;
+  }
 }
 
 function getDropTargetAt(clientX, clientY) {
@@ -1574,6 +1604,7 @@ function activateDrag() {
   } catch {
     /* ignore */
   }
+  createDragGhost(dragState.sourceEl, dragState.lastX, dragState.lastY);
   updateDropIndicators(getDropTargetAt(dragState.lastX, dragState.lastY));
   autoScrollDuringDrag(dragState.lastX, dragState.lastY);
 }
@@ -1646,6 +1677,7 @@ document.addEventListener("pointermove", (e) => {
   }
 
   e.preventDefault();
+  moveDragGhost(e.clientX, e.clientY);
   updateDropIndicators(getDropTargetAt(e.clientX, e.clientY));
 }, { passive: false });
 

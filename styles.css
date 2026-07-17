@@ -817,20 +817,41 @@ main {
 .card:hover {
   border-color: #cfccbf;
   box-shadow: var(--shadow-lift);
-  transform: translateY(-1px);
 }
 
 .card.is-drag-pending {
-  transform: scale(1.02);
   box-shadow: var(--shadow-lift);
   border-color: var(--accent);
 }
 
+/* Source card stays put as a faded placeholder while the ghost follows the cursor */
 .card.dragging,
 .card.is-drag-source {
-  opacity: 0.45;
+  opacity: 0.35;
   cursor: grabbing;
-  transform: scale(1.03);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.card.dragging:hover,
+.card.is-drag-source:hover {
+  box-shadow: none;
+}
+
+/* Floating clone that follows the pointer during a drag */
+.card-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  margin: 0;
+  pointer-events: none;
+  opacity: 0.97;
+  box-shadow: var(--shadow-lift);
+  border-color: var(--accent);
+  cursor: grabbing;
+  will-change: transform;
+  transition: none;
 }
 
 .card.drop-before {
