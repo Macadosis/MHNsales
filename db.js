@@ -70,6 +70,7 @@ function dealToRow(deal) {
     created_at: msToIso(deal.createdAt) || new Date().toISOString(),
     updated_at: new Date().toISOString(),
     notes: Array.isArray(deal.notes) ? deal.notes : [],
+    tasks: Array.isArray(deal.tasks) ? deal.tasks : [],
   };
 }
 
@@ -91,6 +92,7 @@ function rowToDeal(row) {
     dismissedAt: isoToMs(row.dismissed_at) ?? undefined,
     createdAt: isoToMs(row.created_at) || Date.now(),
     notes: Array.isArray(row.notes) ? row.notes : [],
+    tasks: Array.isArray(row.tasks) ? row.tasks : [],
   };
 }
 
@@ -128,9 +130,13 @@ async function upsertDealsToRemote(deals) {
   if (!deals.length) return;
   const rows = deals.map(dealToRow);
   let { error } = await db.from("deals").upsert(rows, { onConflict: "id" });
-  // Older schemas may lack board_order — retry without it so sync still works.
+  // Older schemas may lack newer columns — retry without them so sync still works.
   if (error && /board_order/i.test(error.message || "")) {
     const stripped = rows.map(({ board_order, ...rest }) => rest);
+    ({ error } = await db.from("deals").upsert(stripped, { onConflict: "id" }));
+  }
+  if (error && /tasks/i.test(error.message || "")) {
+    const stripped = rows.map(({ tasks, ...rest }) => rest);
     ({ error } = await db.from("deals").upsert(stripped, { onConflict: "id" }));
   }
   if (error) throw error;

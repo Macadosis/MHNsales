@@ -152,6 +152,7 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="pipeline">Pipeline</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="dashboard">Dashboard</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="history">History</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="tasks">Tasks</button>
         <button type="button" class="nav-menu-logout" id="logoutMenuBtn">Log out</button>
       </nav>
     </div>
@@ -241,6 +242,68 @@
       </div>
       <div class="history-list" id="historyList"></div>
     </section>
+
+    <section id="view-tasks" class="view" hidden>
+      <div class="tasks-toolbar" id="tasksToolbar">
+        <div class="toolbar-scroll">
+          <div class="filters" id="tasksFilters"></div>
+          <div class="search-anchor">
+            <div class="search-bubble" id="tasksSearchBubble">
+              <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+                <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <input type="search" id="tasksSearchInput" class="search-input" placeholder="Search deals" aria-label="Search tasks by company name" autocomplete="off" />
+              <button type="button" class="search-clear" id="tasksSearchClearBtn" aria-label="Clear search" hidden>&times;</button>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="tasksClearFiltersBtn" hidden>Clear filters</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="tasksShowCompletedBtn" aria-pressed="false">
+            Show completed
+          </button>
+        </div>
+        <div class="tasks-toolbar-aside">
+          <div class="tasks-view-toggle" role="group" aria-label="Tasks layout">
+            <button type="button" class="tasks-view-btn is-active" data-tasks-view="list" aria-pressed="true">
+              List
+            </button>
+            <button type="button" class="tasks-view-btn" data-tasks-view="pipeline" aria-pressed="false">
+              Pipeline
+            </button>
+          </div>
+          <div class="tasks-pipeline-period" id="tasksPipelinePeriod" hidden>
+            <button type="button" class="period-nav" id="tasksPipelinePrevBtn" aria-label="Previous period">‹</button>
+            <span class="period-label" id="tasksPipelinePeriodLabel"></span>
+            <button type="button" class="period-nav" id="tasksPipelineNextBtn" aria-label="Next period">›</button>
+            <select class="period-select" id="tasksPipelinePeriodLength" aria-label="Period length">
+              <option value="1" selected>1 month</option>
+              <option value="3">3 months</option>
+              <option value="4">4 months</option>
+              <option value="6">6 months</option>
+              <option value="12">12 months</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="tasks-layout" id="tasksListLayout">
+        <aside class="tasks-calendar" id="tasksCalendar" aria-label="Task calendar"></aside>
+        <div class="tasks-main">
+          <div class="tasks-list-header">
+            <h2 class="tasks-title" id="tasksListTitle">Tasks</h2>
+            <p class="tasks-lead" id="tasksListLead">All open tasks, sorted by due date.</p>
+          </div>
+          <div class="tasks-list" id="tasksList"></div>
+        </div>
+      </div>
+
+      <div class="tasks-pipeline-chart" id="tasksPipelineLayout" hidden>
+        <div class="tasks-pipeline-axis" id="tasksPipelineAxis"></div>
+        <div class="tasks-pipeline-body">
+          <div class="tasks-pipeline-rows" id="tasksPipelineRows"></div>
+        </div>
+      </div>
+    </section>
   </main>
   </div><!-- /.app-shell -->
 
@@ -274,6 +337,17 @@
             data-modal-tab="activity"
           >
             Activity Log
+          </button>
+          <button
+            type="button"
+            class="modal-tab"
+            role="tab"
+            id="dealTabTasks"
+            aria-selected="false"
+            aria-controls="modalPanelTasks"
+            data-modal-tab="tasks"
+          >
+            Tasks
           </button>
         </div>
 
@@ -416,6 +490,38 @@
                 >
                   <img src="obsidian.png" alt="" class="obsidian-icon" />
                 </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="modal-panel"
+          id="modalPanelTasks"
+          role="tabpanel"
+          aria-labelledby="dealTabTasks"
+          hidden
+        >
+          <div class="deal-tasks">
+            <div class="deal-tasks-list" id="dealTasksList"></div>
+            <div class="deal-tasks-composer">
+              <label class="field">
+                <span class="field-label">Task name</span>
+                <input
+                  type="text"
+                  id="newTaskNameInput"
+                  class="task-name-input"
+                  placeholder="Follow up call…"
+                  autocomplete="off"
+                  form="mhn-task-composer-unbound"
+                />
+              </label>
+              <label class="field">
+                <span class="field-label">Due date</span>
+                <input type="date" id="newTaskDueInput" form="mhn-task-composer-unbound" />
+              </label>
+              <div class="deal-tasks-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="addTaskBtn">Add task</button>
               </div>
             </div>
           </div>

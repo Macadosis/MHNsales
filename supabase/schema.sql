@@ -25,6 +25,9 @@ create table if not exists public.deals (
 alter table public.deals
   add column if not exists board_order double precision;
 
+alter table public.deals
+  add column if not exists tasks jsonb not null default '[]'::jsonb;
+
 create index if not exists deals_stage_idx on public.deals (stage);
 create index if not exists deals_owner_idx on public.deals (owner);
 create index if not exists deals_board_order_idx on public.deals (stage, board_order);

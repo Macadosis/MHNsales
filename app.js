@@ -22,6 +22,9 @@ const MS_DAY = 86400000;
 const PIPELINE_ROW_HEIGHT = 56;
 const PIPELINE_BAR_HEIGHT = 36;
 const PIPELINE_BAR_TOP = (PIPELINE_ROW_HEIGHT - PIPELINE_BAR_HEIGHT) / 2;
+const TASKS_PIPELINE_ROW_HEIGHT = Math.round(PIPELINE_ROW_HEIGHT * 0.75); // 42
+const TASKS_PIPELINE_BAR_HEIGHT = Math.round(PIPELINE_BAR_HEIGHT * 0.75); // 27
+const TASKS_PIPELINE_BAR_TOP = (TASKS_PIPELINE_ROW_HEIGHT - TASKS_PIPELINE_BAR_HEIGHT) / 2;
 
 let deals = [];
 let currentUser = null; // { name: string }
@@ -32,9 +35,22 @@ let pendingCommitDeal = null; // deal awaiting implementation days before moving
 let openFilterKey = null;
 let activeTab = "board";
 let modalNotes = [];
+let modalTasks = [];
 let modalPanel = "details";
 let syncingFromRemote = false;
 let appStarted = false;
+let showCompletedTasks = false;
+let tasksViewMode = "list"; // "list" | "pipeline"
+const tasksCalendarState = {
+  monthStart: null,
+  selectedDate: null,
+};
+const tasksPipelineState = {
+  periodMonths: 1,
+  anchorDate: null, // window is anchored on this day (defaults to today)
+};
+const TASKS_PIPELINE_LOOKBACK_DAYS = 7;
+const TASKS_PIPELINE_LABEL_MAX = 20;
 
 const pipelineState = {
   periodMonths: 4,
@@ -77,9 +93,31 @@ const activityNotesEl = document.getElementById("activityNotes");
 const newNoteInput = document.getElementById("newNoteInput");
 const modalPanelDetails = document.getElementById("modalPanelDetails");
 const modalPanelActivity = document.getElementById("modalPanelActivity");
+const modalPanelTasks = document.getElementById("modalPanelTasks");
+const dealTasksListEl = document.getElementById("dealTasksList");
+const newTaskNameInput = document.getElementById("newTaskNameInput");
+const newTaskDueInput = document.getElementById("newTaskDueInput");
+const tasksFiltersEl = document.getElementById("tasksFilters");
+const tasksClearFiltersBtn = document.getElementById("tasksClearFiltersBtn");
+const tasksListEl = document.getElementById("tasksList");
+const tasksCalendarEl = document.getElementById("tasksCalendar");
+const tasksListTitle = document.getElementById("tasksListTitle");
+const tasksListLead = document.getElementById("tasksListLead");
+const tasksShowCompletedBtn = document.getElementById("tasksShowCompletedBtn");
+const tasksSearchInput = document.getElementById("tasksSearchInput");
+const tasksSearchClearBtn = document.getElementById("tasksSearchClearBtn");
+const tasksSearchBubble = document.getElementById("tasksSearchBubble");
+const tasksListLayout = document.getElementById("tasksListLayout");
+const tasksPipelineLayout = document.getElementById("tasksPipelineLayout");
+const tasksPipelinePeriod = document.getElementById("tasksPipelinePeriod");
+const tasksPipelinePeriodLabel = document.getElementById("tasksPipelinePeriodLabel");
+const tasksPipelinePeriodLength = document.getElementById("tasksPipelinePeriodLength");
+const tasksPipelineAxisEl = document.getElementById("tasksPipelineAxis");
+const tasksPipelineRowsEl = document.getElementById("tasksPipelineRows");
 const modalEl = overlay.querySelector(".modal");
 const cancelBtn = document.getElementById("cancelBtn");
 const activityComposer = modalPanelActivity.querySelector(".activity-composer");
+const dealTasksComposer = modalPanelTasks.querySelector(".deal-tasks-composer");
 const fieldSuggestionState = new Map();
 
 const fmtEuro = new Intl.NumberFormat("de-DE", {
@@ -497,6 +535,28 @@ function migrateDeals({ persist = true } = {}) {
         changed = true;
       }
     }
+
+    if (!Array.isArray(deal.tasks)) {
+      deal.tasks = [];
+      changed = true;
+    } else {
+      const cleaned = [];
+      let tasksChanged = false;
+      for (const raw of deal.tasks) {
+        const task = normalizeTask(raw);
+        if (!task.text || task.dueAt == null) {
+          tasksChanged = true;
+          continue;
+        }
+        if (Number(raw.dueAt) !== task.dueAt) tasksChanged = true;
+        cleaned.push(task);
+      }
+      if (cleaned.length !== deal.tasks.length) tasksChanged = true;
+      if (tasksChanged) {
+        deal.tasks = cleaned;
+        changed = true;
+      }
+    }
   }
 
   if (ensureBoardOrders()) changed = true;
@@ -609,8 +669,31 @@ function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
+if (!tasksCalendarState.monthStart) {
+  tasksCalendarState.monthStart = startOfMonth(new Date());
+}
+if (!tasksPipelineState.anchorDate) {
+  tasksPipelineState.anchorDate = startOfDay(new Date());
+}
+
 function addMonths(date, count) {
   return new Date(date.getFullYear(), date.getMonth() + count, 1);
+}
+
+function addDays(date, days) {
+  return startOfDay(new Date(date.getFullYear(), date.getMonth(), date.getDate() + days));
+}
+
+/** Shift by calendar months while keeping the day-of-month when possible. */
+function shiftDateByMonths(date, months) {
+  const source = startOfDay(date);
+  const targetMonth = source.getMonth() + months;
+  const target = new Date(source.getFullYear(), targetMonth, source.getDate());
+  // Clamp overflow (e.g. Jan 31 + 1 month) to the last day of the target month.
+  if (target.getDate() !== source.getDate()) {
+    return startOfDay(new Date(source.getFullYear(), targetMonth + 1, 0));
+  }
+  return startOfDay(target);
 }
 
 function formatMonthDay(date) {
@@ -979,29 +1062,75 @@ const searchBubble = document.getElementById("searchBubble");
 const searchInput = document.getElementById("searchInput");
 const searchClearBtn = document.getElementById("searchClearBtn");
 
-function applySearch(value) {
+function applySearch(value, { source } = {}) {
   searchQuery = value.trim().toLowerCase();
   const hasQuery = searchQuery.length > 0;
-  searchBubble.classList.toggle("has-query", hasQuery);
-  searchClearBtn.hidden = !hasQuery;
+  const rawValue = value;
+
+  if (source !== "tasks" && searchInput) {
+    if (searchInput.value !== rawValue) searchInput.value = rawValue;
+  }
+  if (source !== "board" && tasksSearchInput) {
+    if (tasksSearchInput.value !== rawValue) tasksSearchInput.value = rawValue;
+  }
+
+  updateSearchClearUi(searchBubble, searchClearBtn, hasQuery);
+  updateSearchClearUi(tasksSearchBubble, tasksSearchClearBtn, hasQuery);
+
   // Debounce board re-render so typing doesn't fight the caret / keyboard on iOS.
   clearTimeout(applySearch._timer);
   applySearch._timer = setTimeout(() => render(), 80);
 }
 
-searchInput.addEventListener("input", () => applySearch(searchInput.value));
+function updateSearchClearUi(bubble, clearBtn, hasQuery) {
+  if (!bubble || !clearBtn) return;
+  bubble.classList.toggle("has-query", hasQuery);
+  if (isMobileViewport()) {
+    clearBtn.hidden = false;
+    clearBtn.style.visibility = hasQuery ? "visible" : "hidden";
+    clearBtn.setAttribute("aria-hidden", hasQuery ? "false" : "true");
+    clearBtn.tabIndex = hasQuery ? 0 : -1;
+  } else {
+    clearBtn.hidden = !hasQuery;
+    clearBtn.style.visibility = "";
+    clearBtn.removeAttribute("aria-hidden");
+    clearBtn.tabIndex = 0;
+  }
+}
+
+searchInput.addEventListener("input", () => applySearch(searchInput.value, { source: "board" }));
 searchInput.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && searchInput.value) {
     e.stopPropagation();
     searchInput.value = "";
-    applySearch("");
+    applySearch("", { source: "board" });
   }
 });
 searchClearBtn.addEventListener("click", () => {
   searchInput.value = "";
-  applySearch("");
-  searchInput.focus();
+  applySearch("", { source: "board" });
+  searchInput.focus({ preventScroll: true });
 });
+
+if (tasksSearchInput) {
+  tasksSearchInput.addEventListener("input", () =>
+    applySearch(tasksSearchInput.value, { source: "tasks" })
+  );
+  tasksSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && tasksSearchInput.value) {
+      e.stopPropagation();
+      tasksSearchInput.value = "";
+      applySearch("", { source: "tasks" });
+    }
+  });
+}
+if (tasksSearchClearBtn) {
+  tasksSearchClearBtn.addEventListener("click", () => {
+    tasksSearchInput.value = "";
+    applySearch("", { source: "tasks" });
+    tasksSearchInput.focus({ preventScroll: true });
+  });
+}
 
 function isMobileViewport() {
   return window.matchMedia("(max-width: 720px)").matches;
@@ -1039,16 +1168,28 @@ function scrollClearFiltersIntoView(clearBtn) {
 
 function expandSearch() {
   searchBubble.classList.add("is-expanded");
+  searchClearBtn.hidden = false;
+  if (!searchInput.value) {
+    searchClearBtn.style.visibility = "hidden";
+    searchClearBtn.tabIndex = -1;
+  }
   if (document.activeElement !== searchInput) {
     searchInput.focus({ preventScroll: true });
   }
-  // After the bubble finishes expanding, bring it fully into the toolbar viewport.
-  setTimeout(scrollSearchIntoView, 220);
+  // After the open animation finishes, lock transitions so typing can’t re-animate width.
+  clearTimeout(expandSearch._settleTimer);
+  expandSearch._settleTimer = setTimeout(() => {
+    searchBubble.classList.add("is-expanded-settled");
+    scrollSearchIntoView();
+  }, 220);
 }
 
 searchInput.addEventListener("focus", expandSearch);
 searchInput.addEventListener("blur", () => {
-  if (!searchInput.value) searchBubble.classList.remove("is-expanded");
+  if (!searchInput.value) {
+    searchBubble.classList.remove("is-expanded", "is-expanded-settled");
+    searchClearBtn.style.visibility = "hidden";
+  }
 });
 
 searchBubble.addEventListener("pointerdown", (e) => {
@@ -1071,6 +1212,9 @@ function render() {
     renderPipeline();
   } else if (activeTab === "history") {
     renderHistory();
+  } else if (activeTab === "tasks") {
+    renderFilters(tasksFiltersEl, tasksClearFiltersBtn);
+    renderTasksView();
   }
 }
 
@@ -1921,12 +2065,49 @@ function formatNoteTimestamp(timestamp) {
   });
 }
 
+function formatTaskDueDate(timestamp) {
+  return new Date(timestamp).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function isTaskOverdue(task, now = Date.now()) {
+  if (!task || task.done || task.dueAt == null) return false;
+  return task.dueAt < startOfDay(new Date(now)).getTime();
+}
+
+function normalizeTask(task) {
+  const dueRaw = task?.dueAt;
+  const dueAt =
+    dueRaw == null || dueRaw === ""
+      ? null
+      : Number(dueRaw);
+  return {
+    id: task.id || crypto.randomUUID(),
+    text: (task.text || "").trim(),
+    dueAt: Number.isFinite(dueAt) ? dueAt : null,
+    done: Boolean(task.done),
+    completedAt: task.completedAt ?? null,
+    createdAt: Number(task.createdAt) || Date.now(),
+    updatedAt: task.updatedAt == null ? null : Number(task.updatedAt),
+  };
+}
+
+function serializeModalTasks() {
+  return modalTasks
+    .map((task) => normalizeTask(task))
+    .filter((task) => task.text && task.dueAt != null);
+}
+
 function setModalPanel(panel) {
   modalPanel = panel;
-  const isDetails = panel === "details";
 
-  modalPanelDetails.hidden = !isDetails;
-  modalPanelActivity.hidden = isDetails;
+  modalPanelDetails.hidden = panel !== "details";
+  modalPanelActivity.hidden = panel !== "activity";
+  modalPanelTasks.hidden = panel !== "tasks";
 
   document.querySelectorAll(".modal-tab").forEach((tab) => {
     const active = tab.dataset.modalTab === panel;
@@ -1934,16 +2115,21 @@ function setModalPanel(panel) {
     tab.setAttribute("aria-selected", active ? "true" : "false");
   });
 
-  // Notes rendered while the panel was hidden report scrollHeight 0, which
-  // collapses their textareas. Re-render now that the panel is visible so the
-  // saved text is measured and shown correctly.
-  if (!isDetails) {
+  // Content rendered while a panel was hidden reports scrollHeight 0.
+  // Re-render now that the panel is visible so text is measured correctly.
+  if (panel === "activity") {
     renderActivityNotes();
+  } else if (panel === "tasks") {
+    renderDealTasks();
   }
 }
 
 function noteWasEdited(note) {
   return Boolean(note.updatedAt && note.updatedAt > note.createdAt);
+}
+
+function taskWasEdited(task) {
+  return Boolean(task.updatedAt && task.updatedAt > task.createdAt);
 }
 
 function updateActivityNoteTime(note, timeEl) {
@@ -1952,6 +2138,15 @@ function updateActivityNoteTime(note, timeEl) {
   if (noteWasEdited(note)) {
     timeEl.textContent += ` · edited ${formatNoteTimestamp(note.updatedAt)}`;
   }
+}
+
+function updateDealTaskMeta(task, metaEl) {
+  const dueLabel = task.dueAt != null ? formatTaskDueDate(task.dueAt) : "No date";
+  let text = dueLabel;
+  if (task.done) text += " · completed";
+  else if (isTaskOverdue(task)) text += " · overdue";
+  if (taskWasEdited(task)) text += ` · edited ${formatNoteTimestamp(task.updatedAt)}`;
+  metaEl.textContent = text;
 }
 
 function resizeActivityNote(textarea) {
@@ -2040,19 +2235,840 @@ function addActivityNote() {
   renderActivityNotes();
 }
 
+function renderDealTasks() {
+  dealTasksListEl.innerHTML = "";
+
+  const visible = [...modalTasks].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    return (a.dueAt || 0) - (b.dueAt || 0);
+  });
+
+  if (!visible.length) {
+    const empty = document.createElement("p");
+    empty.className = "deal-tasks-empty";
+    empty.textContent = "No tasks yet. Add the first one below.";
+    dealTasksListEl.appendChild(empty);
+    return;
+  }
+
+  for (const task of visible) {
+    const card = document.createElement("article");
+    card.className = "deal-task";
+    card.dataset.taskId = task.id;
+    if (task.done) card.classList.add("is-done");
+    if (isTaskOverdue(task)) card.classList.add("is-overdue");
+
+    const top = document.createElement("div");
+    top.className = "deal-task-top";
+
+    const completeBtn = document.createElement("button");
+    completeBtn.type = "button";
+    completeBtn.className = "task-complete-btn";
+    completeBtn.setAttribute("aria-pressed", task.done ? "true" : "false");
+    completeBtn.setAttribute("aria-label", task.done ? "Mark task incomplete" : "Complete task");
+    completeBtn.disabled = modalReadOnly;
+    completeBtn.addEventListener("click", () => {
+      task.done = !task.done;
+      task.completedAt = task.done ? Date.now() : null;
+      task.updatedAt = Date.now();
+      renderDealTasks();
+    });
+
+    const fields = document.createElement("div");
+    fields.className = "deal-task-fields";
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "task-name-input deal-task-name";
+    nameInput.value = task.text || "";
+    nameInput.defaultValue = task.text || "";
+    nameInput.readOnly = modalReadOnly;
+    nameInput.setAttribute("aria-label", "Task name");
+    // Keep task editors out of deal-form constraint validation / reset ownership quirks.
+    nameInput.setAttribute("form", "mhn-task-composer-unbound");
+    const initialText = task.text || "";
+
+    const dueInput = document.createElement("input");
+    dueInput.type = "date";
+    dueInput.className = "deal-task-due";
+    dueInput.value = task.dueAt != null ? toDateInputValue(task.dueAt) : "";
+    dueInput.defaultValue = dueInput.value;
+    dueInput.readOnly = modalReadOnly;
+    dueInput.disabled = modalReadOnly;
+    dueInput.setAttribute("aria-label", "Task due date");
+    dueInput.setAttribute("form", "mhn-task-composer-unbound");
+    const initialDue = dueInput.value;
+
+    const meta = document.createElement("p");
+    meta.className = "deal-task-meta";
+    updateDealTaskMeta(task, meta);
+
+    nameInput.addEventListener("input", () => {
+      task.text = nameInput.value;
+      if (nameInput.value !== initialText) task.updatedAt = Date.now();
+      updateDealTaskMeta(task, meta);
+    });
+    nameInput.addEventListener("blur", () => {
+      if (nameInput.value !== initialText && !taskWasEdited(task)) {
+        task.updatedAt = Date.now();
+        updateDealTaskMeta(task, meta);
+      }
+    });
+
+    dueInput.addEventListener("change", () => {
+      const nextDue = parseDateInput(dueInput.value);
+      if (nextDue == null) {
+        dueInput.value = initialDue;
+        dueInput.blur();
+        return;
+      }
+      task.dueAt = nextDue;
+      if (dueInput.value !== initialDue) task.updatedAt = Date.now();
+      card.classList.toggle("is-overdue", isTaskOverdue(task));
+      updateDealTaskMeta(task, meta);
+      // Close the native date picker immediately after a choice.
+      dueInput.blur();
+    });
+
+    fields.append(nameInput, dueInput, meta);
+    top.append(completeBtn, fields);
+    card.append(top);
+    dealTasksListEl.appendChild(card);
+  }
+}
+
+function addDealTask() {
+  if (modalReadOnly) return;
+  const text = newTaskNameInput.value.trim();
+  const dueAt = parseDateInput(newTaskDueInput.value);
+  if (!text) {
+    newTaskNameInput.focus();
+    return;
+  }
+  if (dueAt == null) {
+    newTaskDueInput.focus();
+    return;
+  }
+
+  modalTasks.push({
+    id: crypto.randomUUID(),
+    text,
+    dueAt,
+    done: false,
+    completedAt: null,
+    createdAt: Date.now(),
+    updatedAt: null,
+  });
+  newTaskNameInput.value = "";
+  newTaskDueInput.value = "";
+  renderDealTasks();
+  newTaskNameInput.focus();
+}
+
+/* ------------------------------ Tasks view ---------------------- */
+
+function getAllTaskEntries({ includeCompleted = showCompletedTasks } = {}) {
+  const entries = [];
+  for (const deal of getFilteredDeals()) {
+    for (const task of deal.tasks || []) {
+      if (!task?.text || task.dueAt == null) continue;
+      if (!includeCompleted && task.done) continue;
+      entries.push({ deal, task: normalizeTask(task) });
+    }
+  }
+  entries.sort((a, b) => {
+    if (a.task.done !== b.task.done) return a.task.done ? 1 : -1;
+    if (a.task.dueAt !== b.task.dueAt) return a.task.dueAt - b.task.dueAt;
+    return (a.task.createdAt || 0) - (b.task.createdAt || 0);
+  });
+  return entries;
+}
+
+function getTasksForSelectedDate(entries) {
+  if (tasksCalendarState.selectedDate == null) return entries;
+  return entries.filter((entry) => entry.task.dueAt === tasksCalendarState.selectedDate);
+}
+
+function setDealTaskDone(dealId, taskId, done) {
+  const deal = deals.find((d) => d.id === dealId);
+  if (!deal) return;
+  if (!Array.isArray(deal.tasks)) deal.tasks = [];
+  const task = deal.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+  task.done = done;
+  task.completedAt = done ? Date.now() : null;
+  task.updatedAt = Date.now();
+  saveDeals();
+  render();
+}
+
+function renderTasksCalendar(entries) {
+  tasksCalendarEl.innerHTML = "";
+
+  const monthStart = tasksCalendarState.monthStart || startOfMonth(new Date());
+  const monthLabel = monthStart.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const header = document.createElement("div");
+  header.className = "tasks-cal-header";
+
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "period-nav";
+  prevBtn.setAttribute("aria-label", "Previous month");
+  prevBtn.textContent = "‹";
+  prevBtn.addEventListener("click", () => {
+    tasksCalendarState.monthStart = addMonths(monthStart, -1);
+    renderTasksView();
+  });
+
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "period-nav";
+  nextBtn.setAttribute("aria-label", "Next month");
+  nextBtn.textContent = "›";
+  nextBtn.addEventListener("click", () => {
+    tasksCalendarState.monthStart = addMonths(monthStart, 1);
+    renderTasksView();
+  });
+
+  const title = document.createElement("span");
+  title.className = "tasks-cal-month";
+  title.textContent = monthLabel;
+
+  header.append(prevBtn, title, nextBtn);
+
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "btn btn-ghost btn-sm tasks-cal-clear";
+  clearBtn.textContent = "All dates";
+  clearBtn.hidden = tasksCalendarState.selectedDate == null;
+  clearBtn.addEventListener("click", () => {
+    tasksCalendarState.selectedDate = null;
+    renderTasksView();
+  });
+
+  const weekdayRow = document.createElement("div");
+  weekdayRow.className = "tasks-cal-weekdays";
+  for (const label of ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]) {
+    const cell = document.createElement("span");
+    cell.textContent = label;
+    weekdayRow.appendChild(cell);
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "tasks-cal-grid";
+
+  const year = monthStart.getFullYear();
+  const month = monthStart.getMonth();
+  const firstDay = new Date(year, month, 1);
+  // Monday-first offset
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStart = startOfDay(new Date()).getTime();
+
+  const dueCounts = new Map();
+  for (const { task } of entries) {
+    if (task.dueAt == null) continue;
+    dueCounts.set(task.dueAt, (dueCounts.get(task.dueAt) || 0) + 1);
+  }
+
+  for (let i = 0; i < startOffset; i++) {
+    const empty = document.createElement("span");
+    empty.className = "tasks-cal-day is-empty";
+    grid.appendChild(empty);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateTs = startOfDay(new Date(year, month, day)).getTime();
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tasks-cal-day";
+    btn.textContent = String(day);
+    if (dateTs === todayStart) btn.classList.add("is-today");
+    if (tasksCalendarState.selectedDate === dateTs) btn.classList.add("is-selected");
+    if (dueCounts.has(dateTs)) {
+      btn.classList.add("has-tasks");
+      btn.title = `${dueCounts.get(dateTs)} task${dueCounts.get(dateTs) === 1 ? "" : "s"}`;
+    }
+    btn.addEventListener("click", () => {
+      tasksCalendarState.selectedDate =
+        tasksCalendarState.selectedDate === dateTs ? null : dateTs;
+      renderTasksView();
+    });
+    grid.appendChild(btn);
+  }
+
+  tasksCalendarEl.append(header, clearBtn, weekdayRow, grid);
+}
+
+function renderTasksView() {
+  const allEntries = getAllTaskEntries();
+
+  tasksShowCompletedBtn.setAttribute("aria-pressed", showCompletedTasks ? "true" : "false");
+  tasksShowCompletedBtn.textContent = showCompletedTasks ? "Hide completed" : "Show completed";
+  tasksShowCompletedBtn.classList.toggle("is-active", showCompletedTasks);
+
+  document.querySelectorAll(".tasks-view-btn").forEach((btn) => {
+    const active = btn.dataset.tasksView === tasksViewMode;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+
+  const isPipeline = tasksViewMode === "pipeline";
+  if (tasksListLayout) tasksListLayout.hidden = isPipeline;
+  if (tasksPipelineLayout) tasksPipelineLayout.hidden = !isPipeline;
+  if (tasksPipelinePeriod) tasksPipelinePeriod.hidden = !isPipeline;
+
+  if (isPipeline) {
+    renderTasksPipeline(allEntries);
+    return;
+  }
+
+  const entries = getTasksForSelectedDate(allEntries);
+
+  if (tasksCalendarState.selectedDate != null) {
+    tasksListTitle.textContent = formatTaskDueDate(tasksCalendarState.selectedDate);
+    tasksListLead.textContent = showCompletedTasks
+      ? "Tasks due on this day, including completed."
+      : "Open tasks due on this day.";
+  } else {
+    tasksListTitle.textContent = "Tasks";
+    tasksListLead.textContent = showCompletedTasks
+      ? "All tasks sorted by due date."
+      : "Open tasks sorted by due date.";
+  }
+
+  renderTasksCalendar(allEntries);
+
+  tasksListEl.innerHTML = "";
+
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "tasks-empty";
+    const filtersActive = hasActiveFilters() || searchQuery;
+    if (tasksCalendarState.selectedDate != null) {
+      empty.textContent = "No tasks on this date.";
+    } else if (filtersActive) {
+      empty.textContent = "No tasks match the current filters.";
+    } else {
+      empty.textContent = showCompletedTasks
+        ? "No tasks yet. Add tasks from a deal’s Tasks tab."
+        : "No open tasks. Add tasks from a deal’s Tasks tab.";
+    }
+    tasksListEl.appendChild(empty);
+    return;
+  }
+
+  for (const { deal, task } of entries) {
+    tasksListEl.appendChild(renderTaskCard(deal, task));
+  }
+}
+
+function getTasksPipelineAnchor() {
+  return startOfDay(tasksPipelineState.anchorDate || new Date());
+}
+
+function getTasksPipelinePeriodRange() {
+  const anchor = getTasksPipelineAnchor();
+  const start = addDays(anchor, -TASKS_PIPELINE_LOOKBACK_DAYS).getTime();
+  const end = shiftDateByMonths(anchor, tasksPipelineState.periodMonths).getTime();
+  return {
+    start,
+    end,
+    span: Math.max(end - start, MS_DAY),
+    anchor: anchor.getTime(),
+  };
+}
+
+function getOverlappingMonthStarts(rangeStartMs, rangeEndMs) {
+  const months = [];
+  let cursor = startOfMonth(new Date(rangeStartMs));
+  while (cursor.getTime() < rangeEndMs) {
+    months.push(new Date(cursor));
+    cursor = addMonths(cursor, 1);
+  }
+  return months;
+}
+
+function getISOWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / MS_DAY + 1) / 7);
+}
+
+function startOfISOWeek(date) {
+  const d = startOfDay(date);
+  const day = d.getDay(); // 0 Sun … 6 Sat
+  const offset = day === 0 ? -6 : 1 - day; // Monday-start
+  return addDays(d, offset);
+}
+
+function renderTasksPipelineScale(periodStart, periodEnd, span) {
+  const scale = document.createElement("div");
+  scale.className = "tasks-pipeline-axis-scale";
+  scale.setAttribute("aria-hidden", "true");
+
+  if (tasksPipelineState.periodMonths <= 1) {
+    // Day markers for the one-month view.
+    let cursor = startOfDay(new Date(periodStart));
+    while (cursor.getTime() < periodEnd) {
+      const ts = cursor.getTime();
+      const left = ((ts - periodStart) / span) * 100;
+      const tick = document.createElement("span");
+      tick.className = "tasks-pipeline-scale-tick tasks-pipeline-scale-day";
+      tick.style.left = `${left}%`;
+      tick.textContent = String(cursor.getDate());
+      scale.appendChild(tick);
+      cursor = addDays(cursor, 1);
+    }
+  } else {
+    // Week markers for multi-month views (ISO week numbers).
+    const seen = new Set();
+    let cursor = startOfISOWeek(new Date(periodStart));
+    while (cursor.getTime() < periodEnd) {
+      const weekStart = cursor.getTime();
+      const weekNo = getISOWeekNumber(cursor);
+      const key = `${cursor.getFullYear()}-W${weekNo}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        const leftMs = Math.max(weekStart, periodStart);
+        const left = ((leftMs - periodStart) / span) * 100;
+        const tick = document.createElement("span");
+        tick.className = "tasks-pipeline-scale-tick tasks-pipeline-scale-week";
+        tick.style.left = `${left}%`;
+        tick.textContent = `week ${weekNo}`;
+        scale.appendChild(tick);
+      }
+      cursor = addDays(cursor, 7);
+    }
+  }
+
+  return scale;
+}
+
+function truncateTaskPipelineLabel(text) {
+  const value = (text || "").trim();
+  if (value.length <= TASKS_PIPELINE_LABEL_MAX) return value;
+  return value.slice(0, TASKS_PIPELINE_LABEL_MAX);
+}
+
+/** Estimate how far a fit-content task bar extends in timeline ms. */
+function estimateTaskBarWidthMs(entry, span, rowWidthPx) {
+  const labelLen = Math.max(1, truncateTaskPipelineLabel(entry.task.text).length);
+  // Rough match to CSS: ~8.5px/char + padding, against the visible rows width.
+  const approxPx = labelLen * 8.5 + 40;
+  const widthMs = (approxPx / Math.max(rowWidthPx, 1)) * span;
+  const gapMs = (8 / Math.max(rowWidthPx, 1)) * span; // small breathing room
+  return Math.max(MS_DAY, widthMs) + gapMs;
+}
+
+/**
+ * Pack tasks into rows using each bar's visual footprint (not just due date),
+ * so fit-content bubbles don't overlap on the same row.
+ */
+function assignTaskPipelineRows(entries, span, rowWidthPx = 720) {
+  const sorted = [...entries].sort((a, b) => a.task.dueAt - b.task.dueAt);
+  const rowEnds = [];
+
+  for (const entry of sorted) {
+    const start = entry.task.dueAt;
+    const end = start + estimateTaskBarWidthMs(entry, span, rowWidthPx);
+    let row = 0;
+    while (row < rowEnds.length && rowEnds[row] > start) row += 1;
+    if (row === rowEnds.length) rowEnds.push(0);
+    rowEnds[row] = end;
+    entry._pipelineRow = row;
+    entry._pipelineStart = start;
+    entry._pipelineEnd = end;
+  }
+
+  return rowEnds.length;
+}
+
+/** After bars are in the DOM, re-pack from measured widths so nothing overlaps. */
+function relayoutTaskPipelineBars() {
+  const bars = [...tasksPipelineRowsEl.querySelectorAll(".tasks-pipeline-bar")];
+  if (!bars.length) return;
+
+  const rowWidthPx = Math.max(tasksPipelineRowsEl.clientWidth || 720, 1);
+  const placed = []; // { row, leftPx, rightPx }
+
+  // Sort left-to-right so earlier dues claim upper rows first.
+  bars.sort((a, b) => (parseFloat(a.style.left) || 0) - (parseFloat(b.style.left) || 0));
+
+  for (const bar of bars) {
+    const leftPct = parseFloat(bar.style.left) || 0;
+    const leftPx = (leftPct / 100) * rowWidthPx;
+    const widthPx = Math.max(bar.offsetWidth, 1);
+    const rightPx = leftPx + widthPx + 8; // 8px gap
+
+    let row = 0;
+    while (
+      placed.some(
+        (item) => item.row === row && item.leftPx < rightPx && leftPx < item.rightPx
+      )
+    ) {
+      row += 1;
+    }
+
+    placed.push({ row, leftPx, rightPx });
+    bar.style.top = `${row * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
+    bar.dataset.pipelineRow = String(row);
+  }
+
+  const rowCount = placed.reduce((max, item) => Math.max(max, item.row + 1), 1);
+  const finalRows = Math.max(rowCount, 2);
+  tasksPipelineRowsEl.style.height = `${finalRows * TASKS_PIPELINE_ROW_HEIGHT}px`;
+
+  // Rebuild row dividers to match the final packed height.
+  tasksPipelineRowsEl.querySelectorAll(".tasks-pipeline-row-divider").forEach((el) => el.remove());
+  for (let row = 1; row < finalRows; row += 1) {
+    const divider = document.createElement("div");
+    divider.className = "tasks-pipeline-row-divider";
+    divider.style.top = `${row * TASKS_PIPELINE_ROW_HEIGHT}px`;
+    tasksPipelineRowsEl.appendChild(divider);
+  }
+}
+
+function getMonthTaskCount(entries, monthStart, monthEnd) {
+  const monthStartMs = monthStart.getTime();
+  const monthEndMs = monthEnd.getTime();
+  return entries.reduce((count, { task }) => {
+    if (task.dueAt >= monthStartMs && task.dueAt < monthEndMs) return count + 1;
+    return count;
+  }, 0);
+}
+
+function shiftTasksPipelinePeriod(directionMonths) {
+  tasksPipelineState.anchorDate = shiftDateByMonths(
+    getTasksPipelineAnchor(),
+    directionMonths
+  );
+  if (activeTab === "tasks") renderTasksView();
+  else render();
+}
+
+function setTasksViewMode(mode) {
+  if (mode !== "list" && mode !== "pipeline") return;
+  hideTasksPipelineTooltip();
+  tasksViewMode = mode;
+  if (mode === "pipeline") {
+    // Opening pipeline always recenters on today so the lookback + forward span is clear.
+    tasksPipelineState.anchorDate = startOfDay(new Date());
+  }
+  if (activeTab === "tasks") renderTasksView();
+}
+
+function hideTasksPipelineTooltip() {
+  const tip = document.getElementById("tasksPipelineTooltip");
+  if (tip) tip.hidden = true;
+}
+
+function showTasksPipelineTooltip(bar, deal, task) {
+  let tip = document.getElementById("tasksPipelineTooltip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = "tasksPipelineTooltip";
+    tip.className = "tasks-pipeline-tooltip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+  }
+
+  const owner = (deal.owner || "").trim() || "Unassigned";
+  const company = (deal.company || "").trim() || "Untitled deal";
+  tip.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.className = "tasks-pipeline-tooltip-title";
+  title.textContent = task.text;
+
+  const dealRow = document.createElement("div");
+  dealRow.className = "tasks-pipeline-tooltip-row";
+  dealRow.innerHTML = `<span class="tasks-pipeline-tooltip-label">Deal</span>`;
+  const dealVal = document.createElement("span");
+  dealVal.textContent = company;
+  dealRow.appendChild(dealVal);
+
+  const ownerRow = document.createElement("div");
+  ownerRow.className = "tasks-pipeline-tooltip-row";
+  ownerRow.innerHTML = `<span class="tasks-pipeline-tooltip-label">Owner</span>`;
+  const ownerVal = document.createElement("span");
+  ownerVal.textContent = owner;
+  ownerRow.appendChild(ownerVal);
+
+  const dueRow = document.createElement("div");
+  dueRow.className = "tasks-pipeline-tooltip-row";
+  dueRow.innerHTML = `<span class="tasks-pipeline-tooltip-label">Due</span>`;
+  const dueVal = document.createElement("span");
+  dueVal.textContent = formatTaskDueDate(task.dueAt);
+  dueRow.appendChild(dueVal);
+
+  tip.append(title, dealRow, ownerRow, dueRow);
+  tip.hidden = false;
+
+  const rect = bar.getBoundingClientRect();
+  const tipWidth = tip.offsetWidth || 220;
+  const tipHeight = tip.offsetHeight || 96;
+  let left = rect.left + rect.width / 2 - tipWidth / 2;
+  let top = rect.top - tipHeight - 10;
+  left = Math.max(8, Math.min(left, window.innerWidth - tipWidth - 8));
+  if (top < 8) top = rect.bottom + 10;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function renderTasksPipeline(entries) {
+  hideTasksPipelineTooltip();
+
+  const { start: periodStart, end: periodEnd, span } = getTasksPipelinePeriodRange();
+
+  tasksPipelinePeriodLabel.textContent = `${formatMonthDay(new Date(periodStart))} – ${formatMonthDay(new Date(periodEnd - MS_DAY))}`;
+  tasksPipelinePeriodLength.value = String(tasksPipelineState.periodMonths);
+
+  const visibleEntries = entries.filter((entry) => {
+    const due = entry.task.dueAt;
+    return Number.isFinite(due) && due >= periodStart && due < periodEnd;
+  });
+
+  const months = getOverlappingMonthStarts(periodStart, periodEnd);
+
+  tasksPipelineAxisEl.innerHTML = "";
+  tasksPipelineAxisEl.classList.toggle(
+    "is-day-scale",
+    tasksPipelineState.periodMonths <= 1
+  );
+  tasksPipelineAxisEl.classList.toggle(
+    "is-week-scale",
+    tasksPipelineState.periodMonths > 1
+  );
+
+  const monthsRow = document.createElement("div");
+  monthsRow.className = "tasks-pipeline-axis-months";
+
+  for (const monthStart of months) {
+    const monthEnd = addMonths(monthStart, 1);
+    const visibleStart = Math.max(monthStart.getTime(), periodStart);
+    const visibleEnd = Math.min(monthEnd.getTime(), periodEnd);
+    if (visibleEnd <= visibleStart) continue;
+
+    const count = getMonthTaskCount(entries, monthStart, monthEnd);
+    const left = ((visibleStart - periodStart) / span) * 100;
+    const width = ((visibleEnd - visibleStart) / span) * 100;
+
+    const tick = document.createElement("div");
+    tick.className = "tasks-pipeline-tick";
+    tick.style.left = `${left}%`;
+    tick.style.width = `${width}%`;
+
+    const label = document.createElement("span");
+    label.className = "tasks-pipeline-tick-label";
+    label.textContent = formatMonthLabel(monthStart);
+
+    const countEl = document.createElement("span");
+    countEl.className = "tasks-pipeline-tick-count";
+    countEl.title = `${count} task${count === 1 ? "" : "s"} due in ${formatMonthYear(monthStart)}`;
+    countEl.textContent = count === 0 ? "—" : `${count} task${count === 1 ? "" : "s"}`;
+
+    tick.append(label, countEl);
+    monthsRow.appendChild(tick);
+  }
+
+  const today = startOfDay(new Date()).getTime();
+  const todayInPeriod = today >= periodStart && today < periodEnd;
+  if (todayInPeriod) {
+    const todayPct = ((today - periodStart) / span) * 100;
+    const todayTick = document.createElement("div");
+    todayTick.className = "tasks-pipeline-tick tasks-pipeline-tick-today";
+    todayTick.style.left = `${todayPct}%`;
+    todayTick.innerHTML = `<span class="tasks-pipeline-tick-label">Today</span>`;
+    monthsRow.appendChild(todayTick);
+  }
+
+  tasksPipelineAxisEl.append(
+    monthsRow,
+    renderTasksPipelineScale(periodStart, periodEnd, span)
+  );
+
+  tasksPipelineRowsEl.innerHTML = "";
+  const rowWidthPx = Math.max(
+    tasksPipelineLayout?.clientWidth || tasksPipelineRowsEl.clientWidth || 720,
+    720
+  );
+  const rowCount = Math.max(
+    assignTaskPipelineRows(visibleEntries, span, rowWidthPx),
+    1
+  );
+  tasksPipelineRowsEl.style.height = `${Math.max(rowCount, 2) * TASKS_PIPELINE_ROW_HEIGHT}px`;
+
+  for (const monthStart of months) {
+    const monthMs = monthStart.getTime();
+    if (monthMs <= periodStart || monthMs >= periodEnd) continue;
+    const gridLine = document.createElement("div");
+    gridLine.className = "tasks-pipeline-gridline";
+    gridLine.style.left = `${((monthMs - periodStart) / span) * 100}%`;
+    tasksPipelineRowsEl.appendChild(gridLine);
+  }
+
+  for (let row = 1; row < Math.max(rowCount, 2); row += 1) {
+    const divider = document.createElement("div");
+    divider.className = "tasks-pipeline-row-divider";
+    divider.style.top = `${row * TASKS_PIPELINE_ROW_HEIGHT}px`;
+    tasksPipelineRowsEl.appendChild(divider);
+  }
+
+  if (todayInPeriod) {
+    const todayPct = ((today - periodStart) / span) * 100;
+    const todayLine = document.createElement("div");
+    todayLine.className = "tasks-pipeline-today-line";
+    todayLine.style.left = `${todayPct}%`;
+    // Line only — the axis already shows the Today label.
+    tasksPipelineRowsEl.appendChild(todayLine);
+  }
+
+  if (!visibleEntries.length) {
+    const empty = document.createElement("div");
+    empty.className = "tasks-pipeline-empty";
+    const filtersActive = hasActiveFilters() || searchQuery;
+    empty.textContent = filtersActive
+      ? "No matching tasks in this period"
+      : showCompletedTasks
+        ? "No tasks in this period — add tasks from a deal’s Tasks tab"
+        : "No open tasks in this period";
+    tasksPipelineRowsEl.appendChild(empty);
+    return;
+  }
+
+  for (const entry of visibleEntries) {
+    const { deal, task } = entry;
+    const left = ((entry._pipelineStart - periodStart) / span) * 100;
+
+    const bar = document.createElement("button");
+    bar.type = "button";
+    bar.className = "tasks-pipeline-bar";
+    if (task.done) bar.classList.add("is-done");
+    if (isTaskOverdue(task)) bar.classList.add("is-overdue");
+    bar.style.left = `${left}%`;
+    bar.style.top = `${entry._pipelineRow * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
+    bar.setAttribute(
+      "aria-label",
+      `${task.text}, ${deal.company || "Untitled deal"}, due ${formatTaskDueDate(task.dueAt)}`
+    );
+
+    const text = document.createElement("span");
+    text.className = "tasks-pipeline-bar-text";
+
+    const label = document.createElement("span");
+    label.className = "tasks-pipeline-bar-label";
+    label.textContent = truncateTaskPipelineLabel(task.text);
+
+    text.append(label);
+    bar.append(text);
+    bar.addEventListener("mouseenter", () => showTasksPipelineTooltip(bar, deal, task));
+    bar.addEventListener("mousemove", () => showTasksPipelineTooltip(bar, deal, task));
+    bar.addEventListener("mouseleave", hideTasksPipelineTooltip);
+    bar.addEventListener("focus", () => showTasksPipelineTooltip(bar, deal, task));
+    bar.addEventListener("blur", hideTasksPipelineTooltip);
+    bar.addEventListener("click", () => {
+      hideTasksPipelineTooltip();
+      openModal({ deal, initialPanel: "tasks", focusTaskId: task.id });
+    });
+    tasksPipelineRowsEl.appendChild(bar);
+  }
+
+  // Measure real bubble widths and push colliding tasks onto lower rows.
+  requestAnimationFrame(() => relayoutTaskPipelineBars());
+}
+
+function renderTaskCard(deal, task) {
+  const card = document.createElement("article");
+  card.className = "task-card";
+  if (task.done) card.classList.add("is-done");
+  if (isTaskOverdue(task)) card.classList.add("is-overdue");
+
+  const main = document.createElement("div");
+  main.className = "task-card-main";
+
+  const completeBtn = document.createElement("button");
+  completeBtn.type = "button";
+  completeBtn.className = "task-complete-btn";
+  completeBtn.setAttribute("aria-pressed", task.done ? "true" : "false");
+  completeBtn.setAttribute("aria-label", task.done ? "Mark task incomplete" : "Complete task");
+  completeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setDealTaskDone(deal.id, task.id, !task.done);
+  });
+
+  const body = document.createElement("div");
+  body.className = "task-card-body";
+
+  const name = document.createElement("h3");
+  name.className = "task-card-name";
+  name.textContent = task.text;
+
+  const company = document.createElement("p");
+  company.className = "task-card-company";
+  company.textContent = deal.company || "Untitled deal";
+
+  const meta = document.createElement("p");
+  meta.className = "task-card-meta";
+  const bits = [formatTaskDueDate(task.dueAt)];
+  if (deal.owner) bits.push(deal.owner);
+  if (task.done) bits.push("Completed");
+  else if (isTaskOverdue(task)) bits.push("Overdue");
+  meta.textContent = bits.join(" · ");
+
+  body.append(name, company, meta);
+  main.append(completeBtn, body);
+
+  const openBtn = document.createElement("button");
+  openBtn.type = "button";
+  openBtn.className = "btn btn-ghost btn-sm";
+  openBtn.textContent = "Edit";
+  openBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openModal({ deal, initialPanel: "tasks", focusTaskId: task.id });
+  });
+
+  card.append(main, openBtn);
+  card.addEventListener("click", () =>
+    openModal({ deal, initialPanel: "tasks", focusTaskId: task.id })
+  );
+  card.tabIndex = 0;
+  card.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openModal({ deal, initialPanel: "tasks", focusTaskId: task.id });
+    }
+  });
+
+  return card;
+}
+
 /* ------------------------------ Modal --------------------------- */
 
-function openModal({ deal = null, stage = "prospects", readOnly = false } = {}) {
+function openModal({
+  deal = null,
+  stage = "prospects",
+  readOnly = false,
+  initialPanel = "details",
+  focusTaskId = null,
+} = {}) {
   editingId = deal ? deal.id : null;
   modalReadOnly = readOnly && Boolean(deal);
   createStage = stage;
   modalNotes = deal
     ? (deal.notes || []).map((note) => ({ ...note }))
     : [];
-  newNoteInput.value = "";
-  setModalPanel("details");
-  renderActivityNotes();
+  modalTasks = deal
+    ? (deal.tasks || []).map((task) => normalizeTask(task))
+    : [];
 
+  // Reset first so later-rendered task inputs are not wiped back to empty defaults.
   form.reset();
   form.elements.value.value = deal ? deal.value : DEFAULT_VALUE;
 
@@ -2075,13 +3091,25 @@ function openModal({ deal = null, stage = "prospects", readOnly = false } = {}) 
         ? toDateInputValue(deal.committedAt)
         : "";
       form.elements.implementationDuration.value = deal.implementationDays || "";
+    } else {
+      form.elements.implementationStart.value = "";
+      form.elements.implementationDuration.value = "";
     }
   } else {
     implementationFields.hidden = true;
     form.elements.implementationStart.required = false;
     form.elements.implementationDuration.required = false;
+    form.elements.implementationStart.value = "";
+    form.elements.implementationDuration.value = "";
     form.elements.owner.value = getCurrentUserName();
   }
+
+  newNoteInput.value = "";
+  newTaskNameInput.value = "";
+  newTaskDueInput.value = "";
+  setModalPanel(initialPanel);
+  renderActivityNotes();
+  renderDealTasks();
 
   modalTitle.textContent = modalReadOnly
     ? "View deal"
@@ -2094,7 +3122,20 @@ function openModal({ deal = null, stage = "prospects", readOnly = false } = {}) 
   applyModalReadOnly(modalReadOnly);
 
   overlay.hidden = false;
-  if (!modalReadOnly) form.elements.company.focus();
+
+  if (focusTaskId) {
+    const taskCard = dealTasksListEl.querySelector(`[data-task-id="${focusTaskId}"]`);
+    const taskNameInput = taskCard?.querySelector(".deal-task-name");
+    if (taskNameInput && !modalReadOnly) {
+      taskCard.scrollIntoView({ block: "nearest" });
+      taskNameInput.focus();
+      taskNameInput.select?.();
+    }
+  } else if (!modalReadOnly && initialPanel === "details") {
+    form.elements.company.focus();
+  } else if (!modalReadOnly && initialPanel === "tasks" && !modalTasks.length) {
+    newTaskNameInput.focus();
+  }
 }
 
 function applyModalReadOnly(isReadOnly) {
@@ -2112,6 +3153,9 @@ function applyModalReadOnly(isReadOnly) {
   saveBtn.hidden = isReadOnly;
   deleteBtn.hidden = isReadOnly || !editingId;
   activityComposer.hidden = isReadOnly;
+  dealTasksComposer.hidden = isReadOnly;
+  newTaskNameInput.readOnly = isReadOnly;
+  newTaskDueInput.disabled = isReadOnly;
   cancelBtn.textContent = isReadOnly ? "Close" : "Cancel";
 }
 
@@ -2122,7 +3166,10 @@ function closeModal() {
   modalReadOnly = false;
   applyModalReadOnly(false);
   modalNotes = [];
+  modalTasks = [];
   newNoteInput.value = "";
+  newTaskNameInput.value = "";
+  newTaskDueInput.value = "";
   setModalPanel("details");
 }
 
@@ -2201,6 +3248,10 @@ form.addEventListener("submit", (e) => {
         updatedAt: noteWasEdited(note) ? note.updatedAt : note.createdAt,
       }))
       .filter((note) => note.text),
+    tasks: serializeModalTasks().map((task) => ({
+      ...task,
+      updatedAt: taskWasEdited(task) ? task.updatedAt : task.createdAt,
+    })),
   };
 
   if (editingId) {
@@ -2223,6 +3274,7 @@ form.addEventListener("submit", (e) => {
       ...data,
       boardOrder: nextBoardOrder(createStage),
       notes: [makeDealCreationNote(createdAt), ...(data.notes || [])],
+      tasks: data.tasks || [],
     });
   }
 
@@ -2235,6 +3287,59 @@ document.querySelectorAll(".modal-tab").forEach((tab) => {
   tab.addEventListener("click", () => setModalPanel(tab.dataset.modalTab));
 });
 document.getElementById("addNoteBtn").addEventListener("click", addActivityNote);
+document.getElementById("addTaskBtn").addEventListener("click", addDealTask);
+newTaskNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    addDealTask();
+  }
+});
+if (newTaskDueInput) {
+  newTaskDueInput.addEventListener("change", () => {
+    // Dismiss the native date picker as soon as a date is chosen.
+    newTaskDueInput.blur();
+  });
+}
+if (tasksShowCompletedBtn) {
+  tasksShowCompletedBtn.addEventListener("click", () => {
+    showCompletedTasks = !showCompletedTasks;
+    if (activeTab === "tasks") renderTasksView();
+  });
+}
+if (tasksClearFiltersBtn) {
+  tasksClearFiltersBtn.addEventListener("click", clearFilters);
+}
+
+document.querySelectorAll(".tasks-view-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setTasksViewMode(btn.dataset.tasksView));
+});
+
+const tasksPipelinePrevBtn = document.getElementById("tasksPipelinePrevBtn");
+const tasksPipelineNextBtn = document.getElementById("tasksPipelineNextBtn");
+if (tasksPipelinePrevBtn) {
+  tasksPipelinePrevBtn.addEventListener("click", () => {
+    shiftTasksPipelinePeriod(-tasksPipelineState.periodMonths);
+  });
+}
+if (tasksPipelineNextBtn) {
+  tasksPipelineNextBtn.addEventListener("click", () => {
+    shiftTasksPipelinePeriod(tasksPipelineState.periodMonths);
+  });
+}
+if (tasksPipelinePeriodLength) {
+  tasksPipelinePeriodLength.addEventListener("change", () => {
+    tasksPipelineState.periodMonths = Number(tasksPipelinePeriodLength.value) || 1;
+    tasksPipelineState.anchorDate = startOfDay(new Date());
+    if (activeTab === "tasks") renderTasksView();
+  });
+}
+if (tasksPipelineLayout) {
+  tasksPipelineLayout.addEventListener(
+    "scroll",
+    () => hideTasksPipelineTooltip(),
+    { passive: true }
+  );
+}
 
 deleteBtn.addEventListener("click", openDismissModal);
 
@@ -2296,6 +3401,7 @@ document.addEventListener("keydown", (e) => {
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
+    hideTasksPipelineTooltip();
     activeTab = tab.dataset.tab;
     document.querySelectorAll(".tab").forEach((t) => {
       t.classList.toggle("is-active", t === tab);
