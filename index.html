@@ -150,9 +150,9 @@
       <nav class="tabs" id="navMenu" role="tablist">
         <button class="tab is-active" role="tab" aria-selected="true" data-tab="board">Board</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="pipeline">Pipeline</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="tasks">Tasks</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="dashboard">Dashboard</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="history">History</button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="tasks">Tasks</button>
         <button type="button" class="nav-menu-logout" id="logoutMenuBtn">Log out</button>
       </nav>
     </div>
@@ -197,7 +197,7 @@
                 aria-expanded="false"
                 aria-controls="searchSuggestions"
               />
-              <button type="button" class="search-clear" id="searchClearBtn" aria-label="Clear search" hidden>&times;</button>
+              <button type="button" class="search-clear" id="searchClearBtn" aria-label="Clear search" aria-hidden="true" tabindex="-1">&times;</button>
             </div>
             <ul class="combobox-suggestions search-suggestions" id="searchSuggestions" role="listbox" hidden></ul>
           </div>
@@ -231,7 +231,7 @@
                 aria-expanded="false"
                 aria-controls="pipelineSearchSuggestions"
               />
-              <button type="button" class="search-clear" id="pipelineSearchClearBtn" aria-label="Clear search" hidden>&times;</button>
+              <button type="button" class="search-clear" id="pipelineSearchClearBtn" aria-label="Clear search" aria-hidden="true" tabindex="-1">&times;</button>
             </div>
             <ul class="combobox-suggestions search-suggestions" id="pipelineSearchSuggestions" role="listbox" hidden></ul>
           </div>
@@ -299,7 +299,7 @@
                 aria-expanded="false"
                 aria-controls="tasksSearchSuggestions"
               />
-              <button type="button" class="search-clear" id="tasksSearchClearBtn" aria-label="Clear search" hidden>&times;</button>
+              <button type="button" class="search-clear" id="tasksSearchClearBtn" aria-label="Clear search" aria-hidden="true" tabindex="-1">&times;</button>
             </div>
             <ul class="combobox-suggestions search-suggestions" id="tasksSearchSuggestions" role="listbox" hidden></ul>
           </div>

@@ -603,10 +603,6 @@ main {
   font-weight: 500;
 }
 
-.search-input:focus {
-  width: 180px;
-}
-
 .search-input::-webkit-search-decoration,
 .search-input::-webkit-search-cancel-button {
   -webkit-appearance: none;
@@ -621,8 +617,19 @@ main {
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  padding: 0 2px;
+  padding: 0;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  /* Always reserve space so showing the clear control doesn’t grow the bubble */
+  visibility: hidden;
+}
+
+.search-bubble.has-query .search-clear {
+  visibility: visible;
 }
 
 .search-clear:hover { color: var(--ink); }
@@ -1443,10 +1450,14 @@ body.is-card-dragging .card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 20px 0;
+  padding: 16px 28px 0;
   min-width: 0;
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.tasks-toolbar .toolbar-scroll {
+  flex: 1;
 }
 
 .tasks-toolbar-aside {
@@ -2969,7 +2980,6 @@ body.is-card-dragging .card {
     caret-color: transparent;
   }
 
-  /* Kill the desktop .search-input:focus { width: 180px } growth on mobile */
   .search-input:focus {
     width: 0;
   }
@@ -3003,6 +3013,11 @@ body.is-card-dragging .card {
   }
 
   /* Always reserve clear-button space while expanded so first keystroke doesn’t reflow */
+  .search-clear {
+    display: none;
+    width: 0;
+  }
+
   .search-bubble.is-expanded .search-clear,
   .search-bubble.has-query .search-clear {
     display: inline-flex;

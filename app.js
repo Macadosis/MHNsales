@@ -1115,17 +1115,11 @@ function applySearch(value, { source, skipSuggestions = false } = {}) {
 function updateSearchClearUi(bubble, clearBtn, hasQuery) {
   if (!bubble || !clearBtn) return;
   bubble.classList.toggle("has-query", hasQuery);
-  if (isMobileViewport()) {
-    clearBtn.hidden = false;
-    clearBtn.style.visibility = hasQuery ? "visible" : "hidden";
-    clearBtn.setAttribute("aria-hidden", hasQuery ? "false" : "true");
-    clearBtn.tabIndex = hasQuery ? 0 : -1;
-  } else {
-    clearBtn.hidden = !hasQuery;
-    clearBtn.style.visibility = "";
-    clearBtn.removeAttribute("aria-hidden");
-    clearBtn.tabIndex = 0;
-  }
+  // Keep the clear control in layout; only toggle visibility so the bubble never grows.
+  clearBtn.hidden = false;
+  clearBtn.style.visibility = hasQuery ? "visible" : "hidden";
+  clearBtn.setAttribute("aria-hidden", hasQuery ? "false" : "true");
+  clearBtn.tabIndex = hasQuery ? 0 : -1;
 }
 
 function syncSearchInputsFromState() {
