@@ -430,7 +430,13 @@ function saveDeals() {
       }
     }).catch((err) => {
       console.error(err);
-      showSyncStatus("Could not sync to cloud — changes kept locally", true);
+      const detail =
+        err?.message ||
+        err?.error_description ||
+        err?.details ||
+        (typeof err === "string" ? err : "");
+      const suffix = detail ? `: ${String(detail).slice(0, 160)}` : "";
+      showSyncStatus(`Could not sync to cloud — changes kept locally${suffix}`, true);
     });
   } else {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
