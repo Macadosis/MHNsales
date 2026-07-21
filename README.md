@@ -26,6 +26,35 @@ Additional safeguards:
 
 Use the deployed URL for real sales data. Local copies are for UI/preview only.
 
+### GitHub push ≠ database update
+
+| What you change | How it reaches production |
+|-----------------|---------------------------|
+| App UI / JS (`app.js`, `index.html`, …) | `git push` → GitHub Pages deploys the site |
+| Database columns / policies (`supabase/*.sql`) | **You must run the SQL in Supabase** (SQL Editor) |
+
+The repo only *stores* the schema files. Supabase does not auto-apply them on push.
+
+### Keep the database in sync with the app
+
+Whenever `supabase/schema.sql` (or `supabase/sync_schema.sql`) changes — for example after adding **tasks** or **board_order**:
+
+1. Open your project in [Supabase](https://supabase.com) → **SQL Editor**
+2. Paste and run `supabase/sync_schema.sql` (safe to re-run)
+3. Hard-refresh the GitHub Pages app
+
+To see what production currently has:
+
+```sql
+select column_name, data_type
+from information_schema.columns
+where table_schema = 'public' and table_name = 'deals'
+order by ordinal_position;
+```
+
+Columns the app expects today: `id`, `company`, `contact`, `phone`, `email`, `industry`, `tool`, `value`, `owner`, `stage`, `implementation_days`, `committed_at`, `dismissed_at`, `created_at`, `updated_at`, `notes`, `board_order`, `tasks`.
+
+
 ## Setup
 
 ### 1. Supabase
@@ -72,3 +101,4 @@ Keep the repo **private** if you use the open RLS policy in `schema.sql` (person
 | `config.js` | Supabase URL + anon key |
 | `db.js` | Supabase load / save / realtime |
 | `supabase/schema.sql` | Database table + policies |
+| `supabase/sync_schema.sql` | Idempotent “bring production up to date” script |

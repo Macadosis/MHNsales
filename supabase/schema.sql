@@ -1,5 +1,8 @@
 -- MHN Sales — Supabase schema
--- Run this in: Supabase Dashboard → SQL Editor → New query → Run
+--
+-- Pushing to GitHub deploys the website only — it does NOT update this database.
+-- Run this (or sync_schema.sql) in: Supabase Dashboard → SQL Editor → Run
+-- Safe to re-run.
 
 create extension if not exists "pgcrypto";
 
@@ -22,6 +25,7 @@ create table if not exists public.deals (
   notes jsonb not null default '[]'::jsonb
 );
 
+-- Columns added after the original launch
 alter table public.deals
   add column if not exists board_order double precision;
 
@@ -34,7 +38,6 @@ create index if not exists deals_board_order_idx on public.deals (stage, board_o
 
 alter table public.deals enable row level security;
 
--- Require a signed-in user (email/password Auth). Replace the old open policy.
 drop policy if exists "Allow all access for personal use" on public.deals;
 drop policy if exists "Authenticated users full access" on public.deals;
 create policy "Authenticated users full access"
@@ -49,7 +52,6 @@ create policy "Authenticated users full access"
 -- 2) For a small team: disable "Confirm email" so signup can sign in immediately
 -- 3) Authentication → URL Configuration → add your GitHub Pages URL to Redirect URLs
 
--- Realtime so other devices refresh automatically
 do $$
 begin
   alter publication supabase_realtime add table public.deals;

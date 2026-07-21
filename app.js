@@ -64,6 +64,7 @@ const filters = {
 };
 
 let searchQuery = "";
+let searchRawValue = "";
 
 const boardEl = document.getElementById("board");
 const filtersEl = document.getElementById("filters");
@@ -107,6 +108,10 @@ const tasksShowCompletedBtn = document.getElementById("tasksShowCompletedBtn");
 const tasksSearchInput = document.getElementById("tasksSearchInput");
 const tasksSearchClearBtn = document.getElementById("tasksSearchClearBtn");
 const tasksSearchBubble = document.getElementById("tasksSearchBubble");
+const pipelineSearchInput = document.getElementById("pipelineSearchInput");
+const pipelineSearchClearBtn = document.getElementById("pipelineSearchClearBtn");
+const pipelineSearchBubble = document.getElementById("pipelineSearchBubble");
+const searchSuggestionState = new Map();
 const tasksListLayout = document.getElementById("tasksListLayout");
 const tasksPipelineLayout = document.getElementById("tasksPipelineLayout");
 const tasksPipelinePeriod = document.getElementById("tasksPipelinePeriod");
@@ -741,12 +746,13 @@ function getFilteredDismissedDeals() {
   );
 }
 
-function getFieldMatches(fieldKey, query, { trackDismissed = false } = {}) {
+function getFieldMatches(fieldKey, query, { trackDismissed = false, activeOnly = false } = {}) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
 
   const byValue = new Map();
   for (const deal of deals) {
+    if (activeOnly && deal.stage === "dismissed") continue;
     const value = (deal[fieldKey] || "").trim();
     if (!value) continue;
     const key = value.toLowerCase();
@@ -1062,20 +1068,38 @@ const searchBubble = document.getElementById("searchBubble");
 const searchInput = document.getElementById("searchInput");
 const searchClearBtn = document.getElementById("searchClearBtn");
 
-function applySearch(value, { source } = {}) {
+const SEARCH_FIELDS = [
+  { source: "board", input: searchInput, bubble: searchBubble, clearBtn: searchClearBtn, listId: "searchSuggestions" },
+  { source: "pipeline", input: pipelineSearchInput, bubble: pipelineSearchBubble, clearBtn: pipelineSearchClearBtn, listId: "pipelineSearchSuggestions" },
+  { source: "tasks", input: tasksSearchInput, bubble: tasksSearchBubble, clearBtn: tasksSearchClearBtn, listId: "tasksSearchSuggestions" },
+].filter((field) => field.input);
+
+function applySearch(value, { source, skipSuggestions = false } = {}) {
+  searchRawValue = value;
   searchQuery = value.trim().toLowerCase();
   const hasQuery = searchQuery.length > 0;
-  const rawValue = value;
 
-  if (source !== "tasks" && searchInput) {
-    if (searchInput.value !== rawValue) searchInput.value = rawValue;
-  }
-  if (source !== "board" && tasksSearchInput) {
-    if (tasksSearchInput.value !== rawValue) tasksSearchInput.value = rawValue;
+  for (const field of SEARCH_FIELDS) {
+    if (field.source === source) continue;
+    if (field.input.value !== searchRawValue) field.input.value = searchRawValue;
+    updateSearchClearUi(field.bubble, field.clearBtn, hasQuery);
+    if (hasQuery && isMobileViewport() && field.bubble) {
+      field.bubble.classList.add("is-expanded", "is-expanded-settled");
+    } else if (!hasQuery && field.bubble && document.activeElement !== field.input) {
+      field.bubble.classList.remove("is-expanded", "is-expanded-settled");
+    }
   }
 
-  updateSearchClearUi(searchBubble, searchClearBtn, hasQuery);
-  updateSearchClearUi(tasksSearchBubble, tasksSearchClearBtn, hasQuery);
+  const activeField = SEARCH_FIELDS.find((f) => f.source === source);
+  if (activeField) {
+    updateSearchClearUi(activeField.bubble, activeField.clearBtn, hasQuery);
+  }
+
+  if (!skipSuggestions && source) {
+    renderSearchSuggestions(source);
+  } else if (skipSuggestions) {
+    closeAllSearchSuggestions();
+  }
 
   // Debounce board re-render so typing doesn't fight the caret / keyboard on iOS.
   clearTimeout(applySearch._timer);
@@ -1098,49 +1122,189 @@ function updateSearchClearUi(bubble, clearBtn, hasQuery) {
   }
 }
 
-searchInput.addEventListener("input", () => applySearch(searchInput.value, { source: "board" }));
-searchInput.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && searchInput.value) {
-    e.stopPropagation();
-    searchInput.value = "";
-    applySearch("", { source: "board" });
-  }
-});
-searchClearBtn.addEventListener("click", () => {
-  searchInput.value = "";
-  applySearch("", { source: "board" });
-  searchInput.focus({ preventScroll: true });
-});
-
-if (tasksSearchInput) {
-  tasksSearchInput.addEventListener("input", () =>
-    applySearch(tasksSearchInput.value, { source: "tasks" })
-  );
-  tasksSearchInput.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && tasksSearchInput.value) {
-      e.stopPropagation();
-      tasksSearchInput.value = "";
-      applySearch("", { source: "tasks" });
+function syncSearchInputsFromState() {
+  const hasQuery = searchQuery.length > 0;
+  for (const field of SEARCH_FIELDS) {
+    if (field.input.value !== searchRawValue) field.input.value = searchRawValue;
+    updateSearchClearUi(field.bubble, field.clearBtn, hasQuery);
+    if (hasQuery && isMobileViewport() && field.bubble) {
+      field.bubble.classList.add("is-expanded", "is-expanded-settled");
     }
+  }
+}
+
+function setSearchSuggestionsOpen(source, isOpen) {
+  const state = searchSuggestionState.get(source);
+  if (!state) return;
+  const scrollRow = state.input.closest(".toolbar-scroll");
+  if (scrollRow) scrollRow.classList.toggle("is-suggestions-open", isOpen);
+}
+
+function closeSearchSuggestions(source) {
+  const state = searchSuggestionState.get(source);
+  if (!state) return;
+  state.listEl.hidden = true;
+  state.listEl.innerHTML = "";
+  state.activeIndex = -1;
+  state.input.setAttribute("aria-expanded", "false");
+  setSearchSuggestionsOpen(source, false);
+}
+
+function closeAllSearchSuggestions() {
+  for (const source of searchSuggestionState.keys()) {
+    closeSearchSuggestions(source);
+  }
+}
+
+function highlightSearchSuggestion(source, index) {
+  const state = searchSuggestionState.get(source);
+  if (!state) return;
+  const items = state.listEl.querySelectorAll(".combobox-suggestion");
+  items.forEach((el, i) => el.classList.toggle("is-active", i === index));
+  if (items[index]) items[index].scrollIntoView({ block: "nearest" });
+  state.activeIndex = index;
+}
+
+function selectSearchSuggestion(source, name) {
+  const state = searchSuggestionState.get(source);
+  if (!state) return;
+  state.input.value = name;
+  closeSearchSuggestions(source);
+  applySearch(name, { source, skipSuggestions: true });
+  state.input.focus({ preventScroll: true });
+}
+
+function renderSearchSuggestions(source) {
+  const state = searchSuggestionState.get(source);
+  if (!state) return;
+
+  const query = state.input.value;
+  const matches = getFieldMatches("company", query, { activeOnly: true });
+  state.listEl.innerHTML = "";
+  state.activeIndex = -1;
+
+  if (!matches.length) {
+    closeSearchSuggestions(source);
+    return;
+  }
+
+  for (const { name } of matches) {
+    const item = document.createElement("li");
+    item.className = "combobox-suggestion";
+    item.role = "option";
+    item.dataset.value = name;
+
+    const label = document.createElement("span");
+    label.className = "combobox-suggestion-name";
+    label.appendChild(highlightSuggestionMatch(name, query));
+    item.appendChild(label);
+
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      selectSearchSuggestion(source, name);
+    });
+    state.listEl.appendChild(item);
+  }
+
+  state.listEl.hidden = false;
+  state.input.setAttribute("aria-expanded", "true");
+  setSearchSuggestionsOpen(source, true);
+}
+
+function setupSearchSuggestions(source) {
+  const field = SEARCH_FIELDS.find((f) => f.source === source);
+  if (!field) return;
+  const listEl = document.getElementById(field.listId);
+  if (!listEl) return;
+
+  searchSuggestionState.set(source, {
+    input: field.input,
+    listEl,
+    activeIndex: -1,
+  });
+
+  field.input.addEventListener("blur", () => {
+    setTimeout(() => closeSearchSuggestions(source), 150);
   });
 }
-if (tasksSearchClearBtn) {
-  tasksSearchClearBtn.addEventListener("click", () => {
-    tasksSearchInput.value = "";
-    applySearch("", { source: "tasks" });
-    tasksSearchInput.focus({ preventScroll: true });
+
+function wireSearchField(source) {
+  const field = SEARCH_FIELDS.find((f) => f.source === source);
+  if (!field) return;
+
+  setupSearchSuggestions(source);
+
+  field.input.addEventListener("input", () => applySearch(field.input.value, { source }));
+  field.input.addEventListener("keydown", (e) => {
+    const state = searchSuggestionState.get(source);
+    const items = state?.listEl.querySelectorAll(".combobox-suggestion") || [];
+    const isOpen = state && !state.listEl.hidden && items.length > 0;
+
+    if (e.key === "ArrowDown" && isOpen) {
+      e.preventDefault();
+      highlightSearchSuggestion(source, Math.min(state.activeIndex + 1, items.length - 1));
+      return;
+    }
+    if (e.key === "ArrowUp" && isOpen) {
+      e.preventDefault();
+      highlightSearchSuggestion(source, Math.max(state.activeIndex - 1, 0));
+      return;
+    }
+    if (e.key === "Enter" && isOpen && state.activeIndex >= 0) {
+      e.preventDefault();
+      selectSearchSuggestion(source, items[state.activeIndex].dataset.value);
+      return;
+    }
+    if (e.key === "Escape") {
+      if (isOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSearchSuggestions(source);
+        return;
+      }
+      if (field.input.value) {
+        e.stopPropagation();
+        field.input.value = "";
+        applySearch("", { source, skipSuggestions: true });
+      }
+    }
   });
+
+  if (field.clearBtn) {
+    field.clearBtn.addEventListener("click", () => {
+      field.input.value = "";
+      applySearch("", { source, skipSuggestions: true });
+      field.input.focus({ preventScroll: true });
+    });
+  }
+
+  if (field.bubble) {
+    field.input.addEventListener("focus", () => expandSearch(field));
+    field.input.addEventListener("blur", () => {
+      if (!field.input.value) {
+        field.bubble.classList.remove("is-expanded", "is-expanded-settled");
+        if (field.clearBtn) field.clearBtn.style.visibility = "hidden";
+      }
+    });
+    field.bubble.addEventListener("pointerdown", (e) => {
+      if (isMobileViewport() && !field.bubble.classList.contains("is-expanded")) {
+        e.preventDefault();
+        expandSearch(field);
+      }
+    });
+  }
 }
 
 function isMobileViewport() {
   return window.matchMedia("(max-width: 720px)").matches;
 }
 
-function scrollSearchIntoView() {
-  const row = searchBubble.closest(".toolbar-scroll");
+function scrollSearchIntoView(bubble) {
+  if (!bubble) return;
+  const row = bubble.closest(".toolbar-scroll");
   if (!row) return;
   const rowRect = row.getBoundingClientRect();
-  const bubbleRect = searchBubble.getBoundingClientRect();
+  const bubbleRect = bubble.getBoundingClientRect();
   const pad = 12;
   if (bubbleRect.right > rowRect.right - pad) {
     row.scrollBy({ left: bubbleRect.right - rowRect.right + pad, behavior: "smooth" });
@@ -1166,44 +1330,35 @@ function scrollClearFiltersIntoView(clearBtn) {
   });
 }
 
-function expandSearch() {
-  searchBubble.classList.add("is-expanded");
-  searchClearBtn.hidden = false;
-  if (!searchInput.value) {
-    searchClearBtn.style.visibility = "hidden";
-    searchClearBtn.tabIndex = -1;
+function expandSearch(field) {
+  if (!field?.bubble) return;
+  field.bubble.classList.add("is-expanded");
+  if (field.clearBtn) {
+    field.clearBtn.hidden = false;
+    if (!field.input.value) {
+      field.clearBtn.style.visibility = "hidden";
+      field.clearBtn.tabIndex = -1;
+    }
   }
-  if (document.activeElement !== searchInput) {
-    searchInput.focus({ preventScroll: true });
+  if (document.activeElement !== field.input) {
+    field.input.focus({ preventScroll: true });
   }
-  // After the open animation finishes, lock transitions so typing can’t re-animate width.
   clearTimeout(expandSearch._settleTimer);
   expandSearch._settleTimer = setTimeout(() => {
-    searchBubble.classList.add("is-expanded-settled");
-    scrollSearchIntoView();
+    field.bubble.classList.add("is-expanded-settled");
+    scrollSearchIntoView(field.bubble);
   }, 220);
 }
 
-searchInput.addEventListener("focus", expandSearch);
-searchInput.addEventListener("blur", () => {
-  if (!searchInput.value) {
-    searchBubble.classList.remove("is-expanded", "is-expanded-settled");
-    searchClearBtn.style.visibility = "hidden";
-  }
-});
-
-searchBubble.addEventListener("pointerdown", (e) => {
-  // On mobile the field is icon-only until tapped; expand and focus it.
-  if (isMobileViewport() && !searchBubble.classList.contains("is-expanded")) {
-    e.preventDefault();
-    expandSearch();
-  }
-});
+for (const field of SEARCH_FIELDS) {
+  wireSearchField(field.source);
+}
 
 /* ------------------------------ Rendering ---------------------- */
 
 function render() {
   lastRenderedSignature = JSON.stringify(deals);
+  syncSearchInputsFromState();
   if (activeTab === "board") {
     renderFilters(filtersEl, clearFiltersBtn);
     renderBoard();
@@ -2654,14 +2809,24 @@ function renderTasksPipelineScale(periodStart, periodEnd, span) {
 function truncateTaskPipelineLabel(text) {
   const value = (text || "").trim();
   if (value.length <= TASKS_PIPELINE_LABEL_MAX) return value;
-  return value.slice(0, TASKS_PIPELINE_LABEL_MAX);
+  return `${value.slice(0, TASKS_PIPELINE_LABEL_MAX)}...`;
+}
+
+/** Days from today to the task due date: +2 future, 0 today, -3 past. */
+function formatTaskDayOffset(dueAt) {
+  const today = startOfDay(new Date()).getTime();
+  const due = startOfDay(new Date(dueAt)).getTime();
+  const days = Math.round((due - today) / MS_DAY);
+  if (days > 0) return `+${days}`;
+  return String(days);
 }
 
 /** Estimate how far a fit-content task bar extends in timeline ms. */
 function estimateTaskBarWidthMs(entry, span, rowWidthPx) {
   const labelLen = Math.max(1, truncateTaskPipelineLabel(entry.task.text).length);
-  // Rough match to CSS: ~8.5px/char + padding, against the visible rows width.
-  const approxPx = labelLen * 8.5 + 40;
+  const offsetLen = formatTaskDayOffset(entry.task.dueAt).length;
+  // Rough match to CSS: chars + padding + day-offset badge, against the visible rows width.
+  const approxPx = labelLen * 8.5 + offsetLen * 6.5 + 52;
   const widthMs = (approxPx / Math.max(rowWidthPx, 1)) * span;
   const gapMs = (8 / Math.max(rowWidthPx, 1)) * span; // small breathing room
   return Math.max(MS_DAY, widthMs) + gapMs;
@@ -2690,38 +2855,38 @@ function assignTaskPipelineRows(entries, span, rowWidthPx = 720) {
   return rowEnds.length;
 }
 
-/** After bars are in the DOM, re-pack from measured widths so nothing overlaps. */
+/** After items are in the DOM, re-pack from measured widths so nothing overlaps. */
 function relayoutTaskPipelineBars() {
-  const bars = [...tasksPipelineRowsEl.querySelectorAll(".tasks-pipeline-bar")];
-  if (!bars.length) return;
+  const items = [...tasksPipelineRowsEl.querySelectorAll(".tasks-pipeline-item")];
+  if (!items.length) return;
 
   const rowWidthPx = Math.max(tasksPipelineRowsEl.clientWidth || 720, 1);
   const placed = []; // { row, leftPx, rightPx }
 
   // Sort left-to-right so earlier dues claim upper rows first.
-  bars.sort((a, b) => (parseFloat(a.style.left) || 0) - (parseFloat(b.style.left) || 0));
+  items.sort((a, b) => (parseFloat(a.style.left) || 0) - (parseFloat(b.style.left) || 0));
 
-  for (const bar of bars) {
-    const leftPct = parseFloat(bar.style.left) || 0;
+  for (const item of items) {
+    const leftPct = parseFloat(item.style.left) || 0;
     const leftPx = (leftPct / 100) * rowWidthPx;
-    const widthPx = Math.max(bar.offsetWidth, 1);
+    const widthPx = Math.max(item.offsetWidth, 1);
     const rightPx = leftPx + widthPx + 8; // 8px gap
 
     let row = 0;
     while (
       placed.some(
-        (item) => item.row === row && item.leftPx < rightPx && leftPx < item.rightPx
+        (entry) => entry.row === row && entry.leftPx < rightPx && leftPx < entry.rightPx
       )
     ) {
       row += 1;
     }
 
     placed.push({ row, leftPx, rightPx });
-    bar.style.top = `${row * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
-    bar.dataset.pipelineRow = String(row);
+    item.style.top = `${row * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
+    item.dataset.pipelineRow = String(row);
   }
 
-  const rowCount = placed.reduce((max, item) => Math.max(max, item.row + 1), 1);
+  const rowCount = placed.reduce((max, entry) => Math.max(max, entry.row + 1), 1);
   const finalRows = Math.max(rowCount, 2);
   tasksPipelineRowsEl.style.height = `${finalRows * TASKS_PIPELINE_ROW_HEIGHT}px`;
 
@@ -2947,13 +3112,20 @@ function renderTasksPipeline(entries) {
     const { deal, task } = entry;
     const left = ((entry._pipelineStart - periodStart) / span) * 100;
 
+    const item = document.createElement("div");
+    item.className = "tasks-pipeline-item";
+    item.style.left = `${left}%`;
+    item.style.top = `${entry._pipelineRow * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
+
+    const dayOffset = document.createElement("span");
+    dayOffset.className = "tasks-pipeline-day-offset";
+    dayOffset.textContent = formatTaskDayOffset(task.dueAt);
+
     const bar = document.createElement("button");
     bar.type = "button";
     bar.className = "tasks-pipeline-bar";
     if (task.done) bar.classList.add("is-done");
     if (isTaskOverdue(task)) bar.classList.add("is-overdue");
-    bar.style.left = `${left}%`;
-    bar.style.top = `${entry._pipelineRow * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
     bar.setAttribute(
       "aria-label",
       `${task.text}, ${deal.company || "Untitled deal"}, due ${formatTaskDueDate(task.dueAt)}`
@@ -2977,7 +3149,9 @@ function renderTasksPipeline(entries) {
       hideTasksPipelineTooltip();
       openModal({ deal, initialPanel: "tasks", focusTaskId: task.id });
     });
-    tasksPipelineRowsEl.appendChild(bar);
+
+    item.append(dayOffset, bar);
+    tasksPipelineRowsEl.appendChild(item);
   }
 
   // Measure real bubble widths and push colliding tasks onto lower rows.
@@ -3402,6 +3576,7 @@ document.addEventListener("keydown", (e) => {
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     hideTasksPipelineTooltip();
+    closeAllSearchSuggestions();
     activeTab = tab.dataset.tab;
     document.querySelectorAll(".tab").forEach((t) => {
       t.classList.toggle("is-active", t === tab);

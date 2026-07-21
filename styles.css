@@ -521,7 +521,8 @@ main {
   height: 6px;
 }
 
-.toolbar-scroll.is-menu-open {
+.toolbar-scroll.is-menu-open,
+.toolbar-scroll.is-suggestions-open {
   overflow: visible;
 }
 
@@ -537,6 +538,7 @@ main {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
+  position: relative;
 }
 
 .search-bubble {
@@ -549,6 +551,12 @@ main {
   border-radius: 999px;
   flex-shrink: 0;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.search-suggestions {
+  min-width: 220px;
+  width: max(100%, 220px);
+  z-index: 40;
 }
 
 .search-bubble:hover {
@@ -1673,8 +1681,31 @@ body.is-card-dragging .card {
   z-index: 0;
 }
 
-.tasks-pipeline-bar {
+.tasks-pipeline-item {
   position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 3;
+  max-width: none;
+}
+
+.tasks-pipeline-day-offset {
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  color: #b0ada3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  min-width: 1.5em;
+  text-align: right;
+}
+
+.tasks-pipeline-bar {
+  position: relative;
   height: 27px;
   padding: 0 10px;
   background: var(--tasks-pipe-soft);
@@ -1685,7 +1716,7 @@ body.is-card-dragging .card {
   font-family: var(--font-sans);
   text-align: left;
   width: max-content;
-  max-width: calc(20ch + 24px);
+  max-width: calc(23ch + 24px);
   min-width: 0;
   overflow: hidden;
   box-shadow: var(--shadow-card);
@@ -1693,10 +1724,13 @@ body.is-card-dragging .card {
   z-index: 3;
 }
 
+.tasks-pipeline-item:hover {
+  z-index: 5;
+}
+
 .tasks-pipeline-bar:hover {
   box-shadow: var(--shadow-lift);
   transform: translateY(-1px);
-  z-index: 5;
 }
 
 .tasks-pipeline-bar.is-overdue {
@@ -1716,7 +1750,7 @@ body.is-card-dragging .card {
   height: 100%;
   white-space: nowrap;
   width: max-content;
-  max-width: 20ch;
+  max-width: 23ch;
   min-width: 0;
   pointer-events: none;
 }
@@ -1729,7 +1763,7 @@ body.is-card-dragging .card {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: clip;
-  max-width: 20ch;
+  max-width: 23ch;
 }
 
 .tasks-pipeline-bar.is-done .tasks-pipeline-bar-label {

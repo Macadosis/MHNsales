@@ -185,9 +185,21 @@
                 <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
                 <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
-              <input type="search" id="searchInput" class="search-input" placeholder="Search deals" aria-label="Search deals by name" autocomplete="off" />
+              <input
+                type="search"
+                id="searchInput"
+                class="search-input"
+                placeholder="Search deals"
+                aria-label="Search deals by name"
+                autocomplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="searchSuggestions"
+              />
               <button type="button" class="search-clear" id="searchClearBtn" aria-label="Clear search" hidden>&times;</button>
             </div>
+            <ul class="combobox-suggestions search-suggestions" id="searchSuggestions" role="listbox" hidden></ul>
           </div>
           <button class="btn btn-ghost btn-sm" id="clearFiltersBtn" hidden>Clear filters</button>
         </div>
@@ -201,6 +213,28 @@
       <div class="pipeline-toolbar" id="pipelineToolbar">
         <div class="toolbar-scroll">
           <div class="filters" id="pipelineFilters"></div>
+          <div class="search-anchor">
+            <div class="search-bubble" id="pipelineSearchBubble">
+              <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+                <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <input
+                type="search"
+                id="pipelineSearchInput"
+                class="search-input"
+                placeholder="Search deals"
+                aria-label="Search deals by name"
+                autocomplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="pipelineSearchSuggestions"
+              />
+              <button type="button" class="search-clear" id="pipelineSearchClearBtn" aria-label="Clear search" hidden>&times;</button>
+            </div>
+            <ul class="combobox-suggestions search-suggestions" id="pipelineSearchSuggestions" role="listbox" hidden></ul>
+          </div>
           <button class="btn btn-ghost btn-sm" id="pipelineClearFiltersBtn" hidden>Clear filters</button>
         </div>
         <div class="pipeline-period">
@@ -253,9 +287,21 @@
                 <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
                 <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
-              <input type="search" id="tasksSearchInput" class="search-input" placeholder="Search deals" aria-label="Search tasks by company name" autocomplete="off" />
+              <input
+                type="search"
+                id="tasksSearchInput"
+                class="search-input"
+                placeholder="Search deals"
+                aria-label="Search deals by name"
+                autocomplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="tasksSearchSuggestions"
+              />
               <button type="button" class="search-clear" id="tasksSearchClearBtn" aria-label="Clear search" hidden>&times;</button>
             </div>
+            <ul class="combobox-suggestions search-suggestions" id="tasksSearchSuggestions" role="listbox" hidden></ul>
           </div>
           <button class="btn btn-ghost btn-sm" id="tasksClearFiltersBtn" hidden>Clear filters</button>
           <button type="button" class="btn btn-ghost btn-sm" id="tasksShowCompletedBtn" aria-pressed="false">
