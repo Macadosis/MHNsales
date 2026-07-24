@@ -448,14 +448,28 @@ function applySaveResult(result) {
   }
 }
 
-function saveDeals() {
+/**
+ * Persist local cache and upsert only the affected deal row(s).
+ * @param {string|string[]|null} affectedDealIds changed deal id(s); omit only for local-only cache write
+ */
+function saveDeals(affectedDealIds) {
   // Ignore stale realtime echoes while our write is in flight, so a just-dropped
   // card isn't immediately snapped back to its old stage.
   suppressRemoteRefreshUntil = Date.now() + 1500;
   pendingRemoteRefresh = false;
   const api = window.MHN_DB;
-  if (api?.saveDealsAsync) {
-    api.saveDealsAsync(deals).then(applySaveResult).catch((err) => {
+
+  let ids = [];
+  if (typeof affectedDealIds === "string" && affectedDealIds) {
+    ids = [affectedDealIds];
+  } else if (Array.isArray(affectedDealIds)) {
+    ids = [...new Set(affectedDealIds.filter(Boolean))];
+  }
+
+  const toWrite = ids.length ? deals.filter((d) => ids.includes(d.id)) : [];
+
+  if (api?.upsertDealsAsync) {
+    api.upsertDealsAsync(toWrite, deals).then(applySaveResult).catch((err) => {
       console.error(err);
       showSyncStatus(
         `Could not sync to cloud — changes kept locally${syncErrorDetail(err)}`,
@@ -584,6 +598,7 @@ function makeDealCreationNote(timestamp) {
 
 function migrateDeals({ persist = true } = {}) {
   let changed = false;
+  const changedIds = new Set();
   for (const deal of deals) {
     if (
       deal.stage === "committed" &&
@@ -592,11 +607,13 @@ function migrateDeals({ persist = true } = {}) {
     ) {
       deal.committedAt = startOfDay(new Date(deal.createdAt || Date.now())).getTime();
       changed = true;
+      changedIds.add(deal.id);
     } else if (deal.committedAt) {
       const normalized = startOfDay(new Date(deal.committedAt)).getTime();
       if (normalized !== deal.committedAt) {
         deal.committedAt = normalized;
         changed = true;
+        changedIds.add(deal.id);
       }
     }
 
@@ -607,12 +624,14 @@ function migrateDeals({ persist = true } = {}) {
       if (!notes.some((note) => note.createdAt === created)) {
         deal.notes = [makeDealCreationNote(created), ...notes];
         changed = true;
+        changedIds.add(deal.id);
       }
     }
 
     if (!Array.isArray(deal.tasks)) {
       deal.tasks = [];
       changed = true;
+      changedIds.add(deal.id);
     } else {
       const cleaned = [];
       let tasksChanged = false;
@@ -629,14 +648,21 @@ function migrateDeals({ persist = true } = {}) {
       if (tasksChanged) {
         deal.tasks = cleaned;
         changed = true;
+        changedIds.add(deal.id);
       }
     }
   }
 
-  if (ensureBoardOrders()) changed = true;
+  const boardOrderIds = ensureBoardOrders();
+  if (boardOrderIds.length) {
+    changed = true;
+    for (const id of boardOrderIds) changedIds.add(id);
+  }
 
   // Never push migration fixes from a write-blocked origin (avoids stale local→cloud)
-  if (changed && persist && window.MHN_DB?.cloudWriteEnabled) saveDeals();
+  if (changed && persist && window.MHN_DB?.cloudWriteEnabled) {
+    saveDeals([...changedIds]);
+  }
 }
 
 function compareBoardOrder(a, b) {
@@ -661,7 +687,7 @@ function getStageDeals(stage, { excludeId } = {}) {
 
 /** Assign missing boardOrder values so column order is stable and rearrangeable. */
 function ensureBoardOrders() {
-  let changed = false;
+  const changedIds = [];
   const byStage = new Map();
 
   for (const deal of deals) {
@@ -676,12 +702,12 @@ function ensureBoardOrders() {
     list.forEach((deal, index) => {
       if (deal.boardOrder !== index) {
         deal.boardOrder = index;
-        changed = true;
+        changedIds.push(deal.id);
       }
     });
   }
 
-  return changed;
+  return changedIds;
 }
 
 function nextBoardOrder(stage) {
@@ -690,6 +716,7 @@ function nextBoardOrder(stage) {
   return Math.max(...list.map((d) => d.boardOrder ?? 0)) + 1;
 }
 
+/** @returns {string[]} ids of deals whose stage/boardOrder changed */
 function reorderDeal(deal, targetStage, insertBeforeId) {
   const siblings = getStageDeals(targetStage, { excludeId: deal.id });
   let insertAt = siblings.length;
@@ -702,6 +729,7 @@ function reorderDeal(deal, targetStage, insertBeforeId) {
   siblings.forEach((d, i) => {
     d.boardOrder = i;
   });
+  return siblings.map((d) => d.id);
 }
 
 function initPipelinePeriod() {
@@ -1542,7 +1570,8 @@ function restoreDealToProspects(dealId) {
   if (!deal || deal.stage !== "dismissed") return;
   deal.stage = "prospects";
   delete deal.dismissedAt;
-  saveDeals();
+  deal.boardOrder = nextBoardOrder("prospects");
+  saveDeals(deal.id);
   render();
 }
 
@@ -2153,7 +2182,7 @@ function commitDragDrop(clientX, clientY) {
   if (deal.stage === target.stage && target.insertBeforeId === nextId) return;
 
   reorderDeal(deal, target.stage, target.insertBeforeId);
-  saveDeals();
+  saveDeals(getStageDeals(target.stage).map((d) => d.id));
   render();
 }
 
@@ -2262,7 +2291,7 @@ commitForm.addEventListener("submit", (e) => {
   pendingCommitDeal.committedAt = startDate;
   pendingCommitDeal.implementationDays = days;
   reorderDeal(pendingCommitDeal, "committed", null);
-  saveDeals();
+  saveDeals(getStageDeals("committed").map((d) => d.id));
   render();
   closeCommitModal();
 });
@@ -2616,7 +2645,7 @@ function setDealTaskDone(dealId, taskId, done) {
   task.done = done;
   task.completedAt = done ? Date.now() : null;
   task.updatedAt = Date.now();
-  saveDeals();
+  saveDeals(dealId);
   render();
 }
 
@@ -3428,7 +3457,7 @@ function dismissDeal() {
   if (!deal) return;
   deal.stage = "dismissed";
   deal.dismissedAt = Date.now();
-  saveDeals();
+  saveDeals(deal.id);
   render();
   closeDismissModal();
   closeModal();
@@ -3451,37 +3480,23 @@ function permanentlyDeleteDeal() {
     closeModal();
   };
 
-  // Keep local cache in sync, then explicitly delete the one cloud row.
-  // Sequence matters: delete may need hydration from a reconnecting save.
-  if (api?.saveDealsAsync) {
+  // Local cache + single-row cloud delete (never a full-table rewrite).
+  if (api?.deleteDealAsync) {
     api
-      .saveDealsAsync(deals)
-      .then(async (result) => {
-        applySaveResult(result);
-        if (api.deleteDealAsync) {
-          try {
-            const del = await api.deleteDealAsync(id);
-            if (del?.writeBlocked && del.reason === "not-hydrated") {
-              showSyncStatus(
-                "Offline — deal removed locally; cloud delete pending reconnect.",
-                true,
-                true
-              );
-            }
-          } catch (err) {
-            console.error(err);
-            showSyncStatus(
-              `Could not delete deal from cloud${syncErrorDetail(err)}`,
-              true,
-              true
-            );
-          }
+      .deleteDealAsync(id, deals)
+      .then((result) => {
+        if (result?.writeBlocked && result.reason === "not-hydrated") {
+          showSyncStatus(
+            "Offline — deal removed locally; cloud delete pending reconnect.",
+            true,
+            true
+          );
         }
       })
       .catch((err) => {
         console.error(err);
         showSyncStatus(
-          `Could not sync to cloud — changes kept locally${syncErrorDetail(err)}`,
+          `Could not delete deal from cloud${syncErrorDetail(err)}`,
           true,
           true
         );
@@ -3531,9 +3546,10 @@ form.addEventListener("submit", (e) => {
       deal.committedAt = startDate;
       deal.implementationDays = days;
     }
+    saveDeals(deal.id);
   } else {
     const createdAt = Date.now();
-    deals.push({
+    const newDeal = {
       id: crypto.randomUUID(),
       stage: createStage,
       createdAt,
@@ -3541,10 +3557,11 @@ form.addEventListener("submit", (e) => {
       boardOrder: nextBoardOrder(createStage),
       notes: [makeDealCreationNote(createdAt), ...(data.notes || [])],
       tasks: data.tasks || [],
-    });
+    };
+    deals.push(newDeal);
+    saveDeals(newDeal.id);
   }
 
-  saveDeals();
   render();
   closeModal();
 });

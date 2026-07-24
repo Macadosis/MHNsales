@@ -2,8 +2,8 @@
  *
  * Safety rules:
  * 1) Cloud WRITE only on GitHub Pages (*.github.io) — not file:// or localhost.
- * 2) Never "replace all rows" / mass-delete orphans from a local snapshot.
- *    Saves upsert deals; permanent delete removes one id only.
+ * 2) Cloud writes upsert only the affected deal row(s); permanent delete removes one id.
+ *    Never rewrite the entire deals table from a browser snapshot on routine saves.
  * 3) No cloud writes until this session has successfully loaded from Supabase
  *    (prevents empty/stale localStorage from wiping production).
  * 4) Unsynced local mutations are never silently discarded when cloud returns.
@@ -12,6 +12,7 @@
 const LOCAL_STORAGE_KEY = "mhn-sales-deals";
 const PENDING_SYNC_KEY = "mhn-sales-pending-sync";
 const PENDING_DELETES_KEY = "mhn-sales-pending-deletes";
+const PENDING_UPSERTS_KEY = "mhn-sales-pending-upserts";
 
 function getSupabaseClient() {
   const cfg = window.MHN_CONFIG || {};
@@ -67,23 +68,31 @@ function clearPendingSync() {
   }
 }
 
-function getPendingDeletes() {
+function readIdList(key) {
   try {
-    const raw = JSON.parse(localStorage.getItem(PENDING_DELETES_KEY) || "[]");
+    const raw = JSON.parse(localStorage.getItem(key) || "[]");
     return Array.isArray(raw) ? raw.filter((id) => typeof id === "string" && id) : [];
   } catch {
     return [];
   }
 }
 
-function setPendingDeletes(ids) {
+function writeIdList(key, ids) {
   try {
-    const unique = [...new Set(ids.filter(Boolean))];
-    if (!unique.length) localStorage.removeItem(PENDING_DELETES_KEY);
-    else localStorage.setItem(PENDING_DELETES_KEY, JSON.stringify(unique));
+    const unique = [...new Set((ids || []).filter(Boolean))];
+    if (!unique.length) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(unique));
   } catch {
     /* ignore */
   }
+}
+
+function getPendingDeletes() {
+  return readIdList(PENDING_DELETES_KEY);
+}
+
+function setPendingDeletes(ids) {
+  writeIdList(PENDING_DELETES_KEY, ids);
 }
 
 function queuePendingDelete(id) {
@@ -93,11 +102,49 @@ function queuePendingDelete(id) {
     ids.push(id);
     setPendingDeletes(ids);
   }
+  // A queued delete should not also try to upsert the same row.
+  clearPendingUpserts([id]);
   markPendingSync();
 }
 
 function clearPendingDelete(id) {
   setPendingDeletes(getPendingDeletes().filter((x) => x !== id));
+}
+
+function getPendingUpserts() {
+  return readIdList(PENDING_UPSERTS_KEY);
+}
+
+function queuePendingUpserts(ids) {
+  const list = getPendingUpserts();
+  let changed = false;
+  for (const id of ids || []) {
+    if (!id || list.includes(id)) continue;
+    list.push(id);
+    changed = true;
+  }
+  if (changed) {
+    writeIdList(PENDING_UPSERTS_KEY, list);
+    markPendingSync();
+  }
+}
+
+function clearPendingUpserts(ids) {
+  if (!ids) {
+    writeIdList(PENDING_UPSERTS_KEY, []);
+    return;
+  }
+  const remove = new Set(ids);
+  writeIdList(
+    PENDING_UPSERTS_KEY,
+    getPendingUpserts().filter((id) => !remove.has(id))
+  );
+}
+
+function clearPendingFlagsIfIdle() {
+  if (!getPendingUpserts().length && !getPendingDeletes().length) {
+    clearPendingSync();
+  }
 }
 
 async function flushPendingDeletes() {
@@ -207,7 +254,7 @@ async function fetchRemoteDeals() {
 }
 
 /**
- * Upsert deals only — never deletes other cloud rows.
+ * Upsert specific deal rows only — never deletes other cloud rows.
  * Strips unknown columns progressively so older schemas still sync
  * (including when both board_order and tasks are missing).
  */
@@ -249,22 +296,42 @@ async function deleteDealFromRemote(id) {
   if (error) throw error;
 }
 
+/** Ensure PR1-era pending flag without an id list still flushes safely once. */
+function ensurePendingUpsertIds(localDeals) {
+  if (!hasPendingSync()) return;
+  if (getPendingUpserts().length || getPendingDeletes().length) return;
+  queuePendingUpserts((localDeals || []).map((d) => d.id).filter(Boolean));
+}
+
+async function flushPendingUpsertsFromLocal(localDeals) {
+  ensurePendingUpsertIds(localDeals);
+  const pendingIds = new Set(getPendingUpserts());
+  const deletes = new Set(getPendingDeletes());
+  const toUpsert = (localDeals || []).filter(
+    (d) => d?.id && pendingIds.has(d.id) && !deletes.has(d.id)
+  );
+  if (toUpsert.length) {
+    await upsertDealsToRemote(toUpsert);
+  }
+  clearPendingUpserts([...pendingIds]);
+}
+
 /**
  * After a successful remote fetch: either adopt cloud, migrate empty cloud,
  * or preserve/flush pending local mutations so they are never discarded.
+ * Pending flush upserts only queued deal ids — not the entire table.
  */
 async function resolveHydratedDeals(remote) {
-  if (hasPendingSync() || getPendingDeletes().length) {
-    const local = loadLocalDeals();
-    const merged = mergePreferLocal(local, remote).filter(
-      (d) => !getPendingDeletes().includes(d.id)
-    );
+  const local = loadLocalDeals();
+  ensurePendingUpsertIds(local);
+
+  if (hasPendingSync() || getPendingDeletes().length || getPendingUpserts().length) {
+    const deletes = new Set(getPendingDeletes());
+    const merged = mergePreferLocal(local, remote).filter((d) => !deletes.has(d.id));
     try {
-      if (merged.length) {
-        await upsertDealsToRemote(merged);
-      }
+      await flushPendingUpsertsFromLocal(merged);
       await flushPendingDeletes();
-      clearPendingSync();
+      clearPendingFlagsIfIdle();
       saveLocalDeals(merged);
       lastLoadMeta = { source: "local-pending-synced", cloudHydrated: true };
       return merged;
@@ -277,9 +344,10 @@ async function resolveHydratedDeals(remote) {
   }
 
   if (!remote.length && cloudWriteAllowedByOrigin) {
-    const local = loadLocalDeals();
     if (local.length) {
+      // First-run seed only: empty cloud ← local cache.
       await upsertDealsToRemote(local);
+      clearPendingUpserts();
       clearPendingSync();
       saveLocalDeals(local);
       lastLoadMeta = { source: "local-migrated", cloudHydrated: true };
@@ -288,6 +356,7 @@ async function resolveHydratedDeals(remote) {
   }
 
   saveLocalDeals(remote);
+  clearPendingUpserts();
   clearPendingSync();
   lastLoadMeta = { source: "cloud", cloudHydrated: true };
   return remote;
@@ -317,16 +386,16 @@ async function loadDealsAsync() {
 }
 
 /**
- * Persist deals.
- * - Always mirrors to localStorage (per-origin).
- * - On Pages: upserts to Supabase only after a successful remote load.
- * - If not yet hydrated, attempts one re-fetch so pending edits can flush
- *   when the cloud comes back (without requiring a full page reload).
- * - Marks pending sync when cloud write is blocked or fails.
- * - Never mass-deletes cloud rows.
+ * Persist the full local cache, and upsert only the affected deal rows to cloud.
+ * @param {object[]} dealsToWrite rows that changed
+ * @param {object[]} allDeals full in-memory board (localStorage mirror)
  */
-async function saveDealsAsync(deals) {
-  saveLocalDeals(deals);
+async function upsertDealsAsync(dealsToWrite, allDeals) {
+  const cache = Array.isArray(allDeals) ? allDeals : dealsToWrite;
+  saveLocalDeals(cache);
+  const toWrite = (dealsToWrite || []).filter((d) => d?.id);
+  const ids = toWrite.map((d) => d.id);
+
   if (!db) {
     return { wroteToCloud: false, reason: "no-client" };
   }
@@ -334,15 +403,14 @@ async function saveDealsAsync(deals) {
     return { wroteToCloud: false, writeBlocked: true, reason: "origin-blocked" };
   }
   if (!cloudHydrated) {
-    markPendingSync();
+    queuePendingUpserts(ids);
     try {
       const remote = await fetchRemoteDeals();
-      const merged = mergePreferLocal(deals, remote).filter(
-        (d) => !getPendingDeletes().includes(d.id)
-      );
-      await upsertDealsToRemote(merged);
+      const deletes = new Set(getPendingDeletes());
+      const merged = mergePreferLocal(cache, remote).filter((d) => !deletes.has(d.id));
+      await flushPendingUpsertsFromLocal(merged);
       await flushPendingDeletes();
-      clearPendingSync();
+      clearPendingFlagsIfIdle();
       saveLocalDeals(merged);
       lastLoadMeta = { source: "local-pending-synced", cloudHydrated: true };
       return { wroteToCloud: true, rehydrated: true, deals: merged };
@@ -351,19 +419,41 @@ async function saveDealsAsync(deals) {
       return { wroteToCloud: false, writeBlocked: true, reason: "not-hydrated" };
     }
   }
+
   try {
-    await upsertDealsToRemote(deals);
+    if (toWrite.length) {
+      await upsertDealsToRemote(toWrite);
+      clearPendingUpserts(ids);
+    }
     await flushPendingDeletes();
-    clearPendingSync();
+    clearPendingFlagsIfIdle();
     return { wroteToCloud: true };
   } catch (err) {
     console.error("Failed to save to Supabase:", err);
-    markPendingSync();
+    queuePendingUpserts(ids);
     throw err;
   }
 }
 
-async function deleteDealAsync(id) {
+/**
+ * @deprecated Prefer upsertDealsAsync(changedDeals, allDeals).
+ * Accepts either (allDeals) legacy or (changed, all) — never treats a lone
+ * full array as "rewrite every cloud row" when a second arg is omitted; queues
+ * only the provided changed rows (or none).
+ */
+async function saveDealsAsync(dealsToWrite, allDeals) {
+  if (Array.isArray(allDeals)) {
+    return upsertDealsAsync(dealsToWrite || [], allDeals);
+  }
+  // Legacy single-arg call: local mirror only — do not snapshot-upsert cloud.
+  saveLocalDeals(dealsToWrite || []);
+  return { wroteToCloud: false, reason: "legacy-local-only" };
+}
+
+async function deleteDealAsync(id, allDeals) {
+  if (Array.isArray(allDeals)) {
+    saveLocalDeals(allDeals);
+  }
   if (!db) return { wroteToCloud: false, reason: "no-client" };
   if (!cloudWriteAllowedByOrigin) {
     return { wroteToCloud: false, writeBlocked: true, reason: "origin-blocked" };
@@ -375,6 +465,8 @@ async function deleteDealAsync(id) {
   try {
     await deleteDealFromRemote(id);
     clearPendingDelete(id);
+    clearPendingUpserts([id]);
+    clearPendingFlagsIfIdle();
     return { wroteToCloud: true };
   } catch (err) {
     console.error("Failed to delete deal from Supabase:", err);
@@ -419,6 +511,7 @@ window.MHN_DB = {
     return lastLoadMeta;
   },
   loadDealsAsync,
+  upsertDealsAsync,
   saveDealsAsync,
   deleteDealAsync,
   subscribeToDealChanges,
