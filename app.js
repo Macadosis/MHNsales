@@ -416,6 +416,38 @@ function loadDeals() {
   }
 }
 
+function syncErrorDetail(err) {
+  const detail =
+    err?.message ||
+    err?.error_description ||
+    err?.details ||
+    (typeof err === "string" ? err : "");
+  return detail ? `: ${String(detail).slice(0, 160)}` : "";
+}
+
+function applySaveResult(result) {
+  if (result?.deals && Array.isArray(result.deals)) {
+    deals = result.deals;
+  }
+  if (result?.writeBlocked) {
+    if (result.reason === "not-hydrated") {
+      showSyncStatus(
+        "Offline — pending sync. Changes are local until cloud reconnects.",
+        true,
+        true
+      );
+    }
+    // origin-blocked: cloud-readonly banner already explains this
+    return;
+  }
+  if (result?.wroteToCloud) {
+    // Quiet on routine saves; only celebrate reconnect / pending flush.
+    if (result.rehydrated) {
+      showSyncStatus("Reconnected — saved to cloud");
+    }
+  }
+}
+
 function saveDeals() {
   // Ignore stale realtime echoes while our write is in flight, so a just-dropped
   // card isn't immediately snapped back to its old stage.
@@ -423,20 +455,13 @@ function saveDeals() {
   pendingRemoteRefresh = false;
   const api = window.MHN_DB;
   if (api?.saveDealsAsync) {
-    api.saveDealsAsync(deals).then((result) => {
-      if (result?.writeBlocked) {
-        // Local-only save — cloud intentionally untouched
-        return;
-      }
-    }).catch((err) => {
+    api.saveDealsAsync(deals).then(applySaveResult).catch((err) => {
       console.error(err);
-      const detail =
-        err?.message ||
-        err?.error_description ||
-        err?.details ||
-        (typeof err === "string" ? err : "");
-      const suffix = detail ? `: ${String(detail).slice(0, 160)}` : "";
-      showSyncStatus(`Could not sync to cloud — changes kept locally${suffix}`, true);
+      showSyncStatus(
+        `Could not sync to cloud — changes kept locally${syncErrorDetail(err)}`,
+        true,
+        true
+      );
     });
   } else {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
@@ -481,6 +506,36 @@ let lastRenderedSignature = null;
 let pendingRemoteRefresh = false;
 let suppressRemoteRefreshUntil = 0;
 
+function showLoadSyncStatus(api) {
+  if (!api?.isRemote) return;
+  if (!api.cloudWriteAllowedByOrigin) {
+    showSyncStatus("Cloud read-only — local edits won’t upload", false, true);
+    return;
+  }
+  const meta = api.lastLoadMeta || {};
+  if (!api.cloudHydrated || meta.source === "local-fallback") {
+    showSyncStatus(
+      "Cloud unavailable — using local data. Edits won’t upload until reconnect.",
+      true,
+      true
+    );
+    return;
+  }
+  if (meta.source === "local-pending" || api.hasPendingSync || meta.flushError) {
+    showSyncStatus(
+      "Pending sync — local changes could not be uploaded. Kept locally.",
+      true,
+      true
+    );
+    return;
+  }
+  if (meta.source === "local-pending-synced") {
+    showSyncStatus("Pending local changes uploaded to Supabase");
+    return;
+  }
+  showSyncStatus("Synced with Supabase");
+}
+
 async function refreshDealsFromRemote() {
   const api = window.MHN_DB;
   if (!api?.isRemote || !api.loadDealsAsync) return;
@@ -494,6 +549,14 @@ async function refreshDealsFromRemote() {
     syncingFromRemote = true;
     deals = await api.loadDealsAsync();
     migrateDeals({ persist: Boolean(api.cloudWriteEnabled) });
+    const meta = api.lastLoadMeta || {};
+    if (meta.source === "local-pending" || meta.flushError || api.hasPendingSync) {
+      showSyncStatus(
+        "Pending sync — local changes could not be uploaded. Kept locally.",
+        true,
+        true
+      );
+    }
     // Skip the (destructive) re-render when nothing actually changed, so a
     // hovered card isn't torn down and rebuilt by realtime echo events.
     const signature = JSON.stringify(deals);
@@ -3382,23 +3445,52 @@ function permanentlyDeleteDeal() {
   deals = deals.filter((d) => d.id !== id);
 
   const api = window.MHN_DB;
-  // Keep local cache in sync
+  const finishUi = () => {
+    render();
+    closeDismissModal();
+    closeModal();
+  };
+
+  // Keep local cache in sync, then explicitly delete the one cloud row.
+  // Sequence matters: delete may need hydration from a reconnecting save.
   if (api?.saveDealsAsync) {
-    api.saveDealsAsync(deals).catch((err) => console.error(err));
+    api
+      .saveDealsAsync(deals)
+      .then(async (result) => {
+        applySaveResult(result);
+        if (api.deleteDealAsync) {
+          try {
+            const del = await api.deleteDealAsync(id);
+            if (del?.writeBlocked && del.reason === "not-hydrated") {
+              showSyncStatus(
+                "Offline — deal removed locally; cloud delete pending reconnect.",
+                true,
+                true
+              );
+            }
+          } catch (err) {
+            console.error(err);
+            showSyncStatus(
+              `Could not delete deal from cloud${syncErrorDetail(err)}`,
+              true,
+              true
+            );
+          }
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        showSyncStatus(
+          `Could not sync to cloud — changes kept locally${syncErrorDetail(err)}`,
+          true,
+          true
+        );
+      });
   } else {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
   }
-  // Explicit single-row cloud delete (never a full-table replace)
-  if (api?.deleteDealAsync) {
-    api.deleteDealAsync(id).catch((err) => {
-      console.error(err);
-      showSyncStatus("Could not delete deal from cloud", true);
-    });
-  }
 
-  render();
-  closeDismissModal();
-  closeModal();
+  finishUi();
 }
 
 form.addEventListener("submit", (e) => {
@@ -3705,15 +3797,15 @@ async function startApp() {
   if (api?.loadDealsAsync) {
     try {
       deals = await api.loadDealsAsync();
-      if (api.isRemote && api.cloudWriteAllowedByOrigin) {
-        showSyncStatus("Synced with Supabase");
-      } else if (api.isRemote && !api.cloudWriteAllowedByOrigin) {
-        showSyncStatus("Cloud read-only — local edits won’t upload", false, true);
-      }
+      showLoadSyncStatus(api);
     } catch (err) {
       console.error(err);
       deals = loadDeals();
-      showSyncStatus("Cloud sync unavailable — using local data", true);
+      showSyncStatus(
+        "Cloud sync unavailable — using local data. Edits won’t upload until reconnect.",
+        true,
+        true
+      );
     }
   } else {
     deals = loadDeals();
