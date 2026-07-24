@@ -7,6 +7,8 @@
  * 3) No cloud writes until this session has successfully loaded from Supabase
  *    (prevents empty/stale localStorage from wiping production).
  * 4) Unsynced local mutations are never silently discarded when cloud returns.
+ * 5) Updates use optimistic concurrency (version column). Stale writers get a conflict
+ *    instead of silently overwriting a newer remote row.
  */
 
 const LOCAL_STORAGE_KEY = "mhn-sales-deals";
@@ -41,6 +43,8 @@ function canWriteToCloud() {
 const db = getSupabaseClient();
 const cloudWriteAllowedByOrigin = Boolean(db) && canWriteToCloud();
 let cloudHydrated = false; // true only after a successful remote fetch this session
+/** When false, fall back to legacy upserts (version column missing in production). */
+let versioningEnabled = true;
 /** @type {{ source: string, cloudHydrated: boolean, flushError?: boolean }} */
 let lastLoadMeta = { source: "unloaded", cloudHydrated: false };
 
@@ -168,8 +172,13 @@ function isoToMs(iso) {
   return Number.isFinite(t) ? t : null;
 }
 
-function dealToRow(deal) {
-  return {
+function dealVersion(deal) {
+  const n = Number(deal?.version);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function dealToRow(deal, { nextVersion } = {}) {
+  const row = {
     id: deal.id,
     company: deal.company || "",
     contact: deal.contact || "",
@@ -189,6 +198,10 @@ function dealToRow(deal) {
     notes: Array.isArray(deal.notes) ? deal.notes : [],
     tasks: Array.isArray(deal.tasks) ? deal.tasks : [],
   };
+  if (versioningEnabled) {
+    row.version = nextVersion != null ? nextVersion : dealVersion(deal) || 1;
+  }
+  return row;
 }
 
 function rowToDeal(row) {
@@ -210,6 +223,7 @@ function rowToDeal(row) {
     createdAt: isoToMs(row.created_at) || Date.now(),
     notes: Array.isArray(row.notes) ? row.notes : [],
     tasks: Array.isArray(row.tasks) ? row.tasks : [],
+    version: Number.isFinite(Number(row.version)) ? Number(row.version) : 1,
   };
 }
 
@@ -237,6 +251,14 @@ function mergePreferLocal(local, remote) {
   return Array.from(byId.values());
 }
 
+function mergeDealsById(baseDeals, replacements) {
+  const byId = new Map((baseDeals || []).filter((d) => d?.id).map((d) => [d.id, d]));
+  for (const deal of replacements || []) {
+    if (deal?.id) byId.set(deal.id, deal);
+  }
+  return Array.from(byId.values());
+}
+
 function assertCloudWriteAllowed() {
   if (!cloudWriteAllowedByOrigin) {
     throw new Error("Cloud writes are blocked on this origin");
@@ -254,28 +276,22 @@ async function fetchRemoteDeals() {
 }
 
 /**
- * Upsert specific deal rows only — never deletes other cloud rows.
- * Strips unknown columns progressively so older schemas still sync
- * (including when both board_order and tasks are missing).
+ * Run an insert/update/upsert, stripping unknown columns if the live schema is behind.
+ * @returns {{ data: any, error: any }}
  */
-async function upsertDealsToRemote(deals) {
-  assertCloudWriteAllowed();
-  if (!deals.length) return;
+async function withColumnCompat(run) {
   const omit = new Set();
-  const buildRows = () =>
-    deals.map((deal) => {
-      const row = dealToRow(deal);
-      for (const key of omit) delete row[key];
-      return row;
-    });
-
   let lastError = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const rows = buildRows();
-    const { error } = await db.from("deals").upsert(rows, { onConflict: "id" });
-    if (!error) return;
-    lastError = error;
-    const msg = error.message || "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const result = await run(omit);
+    if (!result.error) return result;
+    lastError = result.error;
+    const msg = result.error.message || "";
+    if (/version/i.test(msg) && versioningEnabled) {
+      versioningEnabled = false;
+      console.warn("deals.version missing — optimistic locking disabled until sync_schema.sql is applied");
+      continue;
+    }
     if (/board_order/i.test(msg) && !omit.has("board_order")) {
       omit.add("board_order");
       continue;
@@ -284,9 +300,112 @@ async function upsertDealsToRemote(deals) {
       omit.add("tasks");
       continue;
     }
+    return result;
+  }
+  return { data: null, error: lastError || new Error("Write failed after schema compatibility retries") };
+}
+
+function stripOmitted(row, omit) {
+  const next = { ...row };
+  for (const key of omit) delete next[key];
+  if (!versioningEnabled) delete next.version;
+  return next;
+}
+
+/** Legacy path when version column is unavailable. */
+async function legacyUpsertDeal(deal) {
+  const { data, error } = await withColumnCompat(async (omit) => {
+    const row = stripOmitted(dealToRow(deal), omit);
+    return db.from("deals").upsert(row, { onConflict: "id" }).select("*").maybeSingle();
+  });
+  if (error) throw error;
+  return { deal: data ? rowToDeal(data) : { ...deal, version: dealVersion(deal) || 1 }, conflict: false };
+}
+
+async function fetchRemoteDealById(id) {
+  const { data, error } = await db.from("deals").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data ? rowToDeal(data) : null;
+}
+
+/**
+ * Write one deal with optimistic concurrency.
+ * @returns {{ deal: object, conflict: boolean }}
+ */
+async function writeDealToRemote(deal) {
+  assertCloudWriteAllowed();
+  if (!deal?.id) throw new Error("Deal id required");
+
+  if (!versioningEnabled) {
+    return legacyUpsertDeal(deal);
+  }
+
+  const expected = dealVersion(deal);
+
+  // Existing row: UPDATE only if version still matches.
+  if (expected > 0) {
+    const { data, error } = await withColumnCompat(async (omit) => {
+      const row = stripOmitted(dealToRow(deal, { nextVersion: expected + 1 }), omit);
+      delete row.id;
+      return db
+        .from("deals")
+        .update(row)
+        .eq("id", deal.id)
+        .eq("version", expected)
+        .select("*");
+    });
+
+    if (error) {
+      if (!versioningEnabled) return legacyUpsertDeal(deal);
+      throw error;
+    }
+
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    if (rows.length) {
+      return { deal: rowToDeal(rows[0]), conflict: false };
+    }
+
+    const remote = await fetchRemoteDealById(deal.id);
+    if (remote) {
+      return { deal: remote, conflict: true };
+    }
+    // Remote row gone — fall through to insert.
+  }
+
+  // New deal (or resurrected after remote delete): INSERT at version 1.
+  const { data, error } = await withColumnCompat(async (omit) => {
+    const row = stripOmitted(dealToRow(deal, { nextVersion: 1 }), omit);
+    return db.from("deals").insert(row).select("*").maybeSingle();
+  });
+
+  if (error) {
+    if (!versioningEnabled) return legacyUpsertDeal(deal);
+    // Unique violation — someone else created/updated first.
+    if (error.code === "23505" || /duplicate/i.test(error.message || "")) {
+      const remote = await fetchRemoteDealById(deal.id);
+      if (remote) return { deal: remote, conflict: true };
+    }
     throw error;
   }
-  throw lastError || new Error("Upsert failed after schema compatibility retries");
+
+  return { deal: data ? rowToDeal(data) : { ...deal, version: 1 }, conflict: false };
+}
+
+/**
+ * Write specific deals only. Returns server rows + any version conflicts.
+ * @returns {{ written: object[], conflicts: object[] }}
+ */
+async function writeDealsToRemote(deals) {
+  assertCloudWriteAllowed();
+  const written = [];
+  const conflicts = [];
+  for (const deal of deals || []) {
+    if (!deal?.id) continue;
+    const result = await writeDealToRemote(deal);
+    if (result.conflict) conflicts.push(result.deal);
+    else written.push(result.deal);
+  }
+  return { written, conflicts };
 }
 
 async function deleteDealFromRemote(id) {
@@ -307,19 +426,28 @@ async function flushPendingUpsertsFromLocal(localDeals) {
   ensurePendingUpsertIds(localDeals);
   const pendingIds = new Set(getPendingUpserts());
   const deletes = new Set(getPendingDeletes());
-  const toUpsert = (localDeals || []).filter(
+  const toWrite = (localDeals || []).filter(
     (d) => d?.id && pendingIds.has(d.id) && !deletes.has(d.id)
   );
-  if (toUpsert.length) {
-    await upsertDealsToRemote(toUpsert);
+  let conflicts = [];
+  if (toWrite.length) {
+    const result = await writeDealsToRemote(toWrite);
+    conflicts = result.conflicts;
+    // Apply successful + conflict (server) rows back into the working set.
+    for (const deal of [...result.written, ...result.conflicts]) {
+      const idx = localDeals.findIndex((d) => d.id === deal.id);
+      if (idx >= 0) localDeals[idx] = deal;
+      else localDeals.push(deal);
+    }
   }
   clearPendingUpserts([...pendingIds]);
+  return conflicts;
 }
 
 /**
  * After a successful remote fetch: either adopt cloud, migrate empty cloud,
  * or preserve/flush pending local mutations so they are never discarded.
- * Pending flush upserts only queued deal ids — not the entire table.
+ * Pending flush writes only queued deal ids — not the entire table.
  */
 async function resolveHydratedDeals(remote) {
   const local = loadLocalDeals();
@@ -329,11 +457,15 @@ async function resolveHydratedDeals(remote) {
     const deletes = new Set(getPendingDeletes());
     const merged = mergePreferLocal(local, remote).filter((d) => !deletes.has(d.id));
     try {
-      await flushPendingUpsertsFromLocal(merged);
+      const conflicts = await flushPendingUpsertsFromLocal(merged);
       await flushPendingDeletes();
       clearPendingFlagsIfIdle();
       saveLocalDeals(merged);
-      lastLoadMeta = { source: "local-pending-synced", cloudHydrated: true };
+      lastLoadMeta = {
+        source: conflicts.length ? "local-pending-conflict" : "local-pending-synced",
+        cloudHydrated: true,
+        flushError: false,
+      };
       return merged;
     } catch (err) {
       console.error("Failed to flush pending local sync:", err);
@@ -346,12 +478,13 @@ async function resolveHydratedDeals(remote) {
   if (!remote.length && cloudWriteAllowedByOrigin) {
     if (local.length) {
       // First-run seed only: empty cloud ← local cache.
-      await upsertDealsToRemote(local);
+      const { written } = await writeDealsToRemote(local);
+      const seeded = written.length ? mergeDealsById(local, written) : local;
       clearPendingUpserts();
       clearPendingSync();
-      saveLocalDeals(local);
+      saveLocalDeals(seeded);
       lastLoadMeta = { source: "local-migrated", cloudHydrated: true };
-      return local;
+      return seeded;
     }
   }
 
@@ -386,7 +519,7 @@ async function loadDealsAsync() {
 }
 
 /**
- * Persist the full local cache, and upsert only the affected deal rows to cloud.
+ * Persist the full local cache, and write only the affected deal rows to cloud.
  * @param {object[]} dealsToWrite rows that changed
  * @param {object[]} allDeals full in-memory board (localStorage mirror)
  */
@@ -408,12 +541,21 @@ async function upsertDealsAsync(dealsToWrite, allDeals) {
       const remote = await fetchRemoteDeals();
       const deletes = new Set(getPendingDeletes());
       const merged = mergePreferLocal(cache, remote).filter((d) => !deletes.has(d.id));
-      await flushPendingUpsertsFromLocal(merged);
+      const conflicts = await flushPendingUpsertsFromLocal(merged);
       await flushPendingDeletes();
       clearPendingFlagsIfIdle();
       saveLocalDeals(merged);
-      lastLoadMeta = { source: "local-pending-synced", cloudHydrated: true };
-      return { wroteToCloud: true, rehydrated: true, deals: merged };
+      lastLoadMeta = {
+        source: conflicts.length ? "local-pending-conflict" : "local-pending-synced",
+        cloudHydrated: true,
+      };
+      return {
+        wroteToCloud: true,
+        rehydrated: true,
+        conflict: conflicts.length > 0,
+        conflicts,
+        deals: merged,
+      };
     } catch (err) {
       console.warn("Skipping cloud save — remote still unavailable:", err);
       return { wroteToCloud: false, writeBlocked: true, reason: "not-hydrated" };
@@ -421,13 +563,25 @@ async function upsertDealsAsync(dealsToWrite, allDeals) {
   }
 
   try {
+    let next = cache;
+    let conflicts = [];
+    let wrote = false;
     if (toWrite.length) {
-      await upsertDealsToRemote(toWrite);
+      const result = await writeDealsToRemote(toWrite);
+      conflicts = result.conflicts;
+      next = mergeDealsById(cache, [...result.written, ...result.conflicts]);
+      saveLocalDeals(next);
       clearPendingUpserts(ids);
+      wrote = result.written.length > 0;
     }
     await flushPendingDeletes();
     clearPendingFlagsIfIdle();
-    return { wroteToCloud: true };
+    return {
+      wroteToCloud: wrote || conflicts.length === 0,
+      conflict: conflicts.length > 0,
+      conflicts,
+      deals: next,
+    };
   } catch (err) {
     console.error("Failed to save to Supabase:", err);
     queuePendingUpserts(ids);
@@ -509,6 +663,9 @@ window.MHN_DB = {
   },
   get lastLoadMeta() {
     return lastLoadMeta;
+  },
+  get versioningEnabled() {
+    return versioningEnabled;
   },
   loadDealsAsync,
   upsertDealsAsync,

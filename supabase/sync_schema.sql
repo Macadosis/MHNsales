@@ -66,6 +66,10 @@ alter table public.deals
 alter table public.deals
   add column if not exists tasks jsonb not null default '[]'::jsonb;
 
+-- Optimistic concurrency: each successful write increments version
+alter table public.deals
+  add column if not exists version bigint not null default 1;
+
 -- Indexes
 create index if not exists deals_stage_idx on public.deals (stage);
 create index if not exists deals_owner_idx on public.deals (owner);

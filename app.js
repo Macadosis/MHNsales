@@ -440,6 +440,16 @@ function applySaveResult(result) {
     // origin-blocked: cloud-readonly banner already explains this
     return;
   }
+  if (result?.conflict) {
+    const n = Array.isArray(result.conflicts) ? result.conflicts.length : 0;
+    const label =
+      n === 1
+        ? "Conflict — that deal changed elsewhere. Loaded the latest version."
+        : `Conflict — ${n || "some"} deals changed elsewhere. Loaded the latest versions.`;
+    showSyncStatus(label, true, true);
+    render();
+    return;
+  }
   if (result?.wroteToCloud) {
     // Quiet on routine saves; only celebrate reconnect / pending flush.
     if (result.rehydrated) {
@@ -538,6 +548,14 @@ function showLoadSyncStatus(api) {
   if (meta.source === "local-pending" || api.hasPendingSync || meta.flushError) {
     showSyncStatus(
       "Pending sync — local changes could not be uploaded. Kept locally.",
+      true,
+      true
+    );
+    return;
+  }
+  if (meta.source === "local-pending-conflict") {
+    showSyncStatus(
+      "Conflict while syncing — some deals were reloaded from the cloud.",
       true,
       true
     );

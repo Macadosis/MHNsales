@@ -37,7 +37,7 @@ The repo only *stores* the schema files. Supabase does not auto-apply them on pu
 
 ### Keep the database in sync with the app
 
-Whenever `supabase/schema.sql` (or `supabase/sync_schema.sql`) changes — for example after adding **tasks** or **board_order**:
+Whenever `supabase/schema.sql` (or `supabase/sync_schema.sql`) changes — for example after adding **tasks**, **board_order**, or **version**:
 
 1. Open your project in [Supabase](https://supabase.com) → **SQL Editor**
 2. Paste and run `supabase/sync_schema.sql` (safe to re-run)
@@ -52,7 +52,7 @@ where table_schema = 'public' and table_name = 'deals'
 order by ordinal_position;
 ```
 
-Columns the app expects today: `id`, `company`, `contact`, `phone`, `email`, `industry`, `tool`, `value`, `owner`, `stage`, `implementation_days`, `committed_at`, `dismissed_at`, `created_at`, `updated_at`, `notes`, `board_order`, `tasks`.
+Columns the app expects today: `id`, `company`, `contact`, `phone`, `email`, `industry`, `tool`, `value`, `owner`, `stage`, `implementation_days`, `committed_at`, `dismissed_at`, `created_at`, `updated_at`, `notes`, `board_order`, `tasks`, `version`.
 
 
 ## Setup
