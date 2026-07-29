@@ -1836,14 +1836,30 @@ function renderPipeline() {
     bar.style.left = `${left}%`;
     bar.style.width = `${width}%`;
     bar.style.top = `${deal._pipelineRow * PIPELINE_ROW_HEIGHT + PIPELINE_BAR_TOP}px`;
-    bar.title = `${deal.company} · ${deal.implementationDays} days · ${formatMonthDay(new Date(barStart))} – ${formatMonthDay(new Date(barEnd - MS_DAY))}`;
+    bar.title = [
+      deal.company,
+      deal.tool,
+      `${deal.implementationDays} days`,
+      `${formatMonthDay(new Date(barStart))} – ${formatMonthDay(new Date(barEnd - MS_DAY))}`,
+    ].filter(Boolean).join(" · ");
 
     const text = document.createElement("span");
     text.className = "pipeline-bar-text";
 
     const label = document.createElement("span");
     label.className = "pipeline-bar-label";
-    label.textContent = deal.company;
+
+    const companyName = document.createElement("span");
+    companyName.className = "pipeline-bar-company";
+    companyName.textContent = deal.company;
+    label.appendChild(companyName);
+
+    if (deal.tool) {
+      const tool = document.createElement("span");
+      tool.className = "pipeline-bar-tool";
+      tool.textContent = deal.tool;
+      label.appendChild(tool);
+    }
 
     const duration = document.createElement("span");
     duration.className = "pipeline-bar-duration";
@@ -1925,7 +1941,18 @@ function renderCard(deal) {
 
   const company = document.createElement("h3");
   company.className = "card-company";
-  company.textContent = deal.company;
+
+  const companyName = document.createElement("span");
+  companyName.className = "card-company-name";
+  companyName.textContent = deal.company;
+  company.appendChild(companyName);
+
+  if (deal.tool) {
+    const tool = document.createElement("span");
+    tool.className = "card-company-tool";
+    tool.textContent = deal.tool;
+    company.appendChild(tool);
+  }
 
   const meta = document.createElement("p");
   meta.className = "card-meta";
@@ -1937,12 +1964,6 @@ function renderCard(deal) {
     const tag = document.createElement("span");
     tag.className = "tag tag-industry";
     tag.textContent = deal.industry;
-    tags.appendChild(tag);
-  }
-  if (deal.tool) {
-    const tag = document.createElement("span");
-    tag.className = "tag tag-tool";
-    tag.textContent = deal.tool;
     tags.appendChild(tag);
   }
   if (deal.implementationDays && deal.committedAt) {

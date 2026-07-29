@@ -943,11 +943,26 @@ body.is-card-dragging .card {
 }
 
 .card-company {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 0 0 2px;
+}
+
+.card-company-name {
   font-family: var(--font-serif);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
-  margin: 0 0 2px;
+}
+
+.card-company-tool {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  letter-spacing: 0.01em;
 }
 
 .card-meta {
@@ -1244,12 +1259,26 @@ body.is-card-dragging .card {
 }
 
 .pipeline-bar-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.pipeline-bar-company {
   font-family: var(--font-serif);
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
-  white-space: nowrap;
-  flex-shrink: 0;
+}
+
+.pipeline-bar-tool {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-soft);
 }
 
 .pipeline-bar-duration {
