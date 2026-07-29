@@ -163,6 +163,15 @@
           Log out
         </button>
       </div>
+      <button class="btn btn-ghost import-btn" id="importDealsBtn" aria-label="Import prospects from a file">
+        <span class="import-btn-label">Import</span>
+        <span class="import-btn-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 15V3M8 7l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </span>
+      </button>
       <button class="btn btn-primary new-deal-btn" id="newDealBtn" aria-label="New deal">
         <span class="new-deal-label">New deal</span>
         <span class="new-deal-icon" aria-hidden="true">
@@ -639,6 +648,112 @@
           </div>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Mass import prospects from Excel / CSV -->
+  <div class="modal-overlay" id="importOverlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+      <div class="modal-header">
+        <h2 id="importTitle">Import prospects</h2>
+        <button class="icon-btn" id="importCloseBtn" aria-label="Close">&times;</button>
+      </div>
+
+      <p class="import-local-warning" id="importLocalWarning" hidden>
+        <strong>Local / preview mode</strong> — imported cards stay in this browser and are not
+        uploaded. Use the deployed app for real prospects.
+      </p>
+
+      <div class="import-step" id="importStepFile">
+        <p class="modal-lead">
+          Upload an Excel or CSV file. <strong>Company name</strong> is the only required column —
+          everything else is optional.
+        </p>
+
+        <div class="import-drop" id="importDropZone" role="button" tabindex="0" aria-controls="importFileInput">
+          <svg class="import-drop-icon" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 16V4M8 8l4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+          <span class="import-drop-title">Drop your file here, or click to browse</span>
+          <span class="import-drop-hint">.xlsx, .xls or .csv — up to 300 rows</span>
+        </div>
+        <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" hidden />
+
+        <div class="import-columns">
+          <span class="field-label">Columns we recognise</span>
+          <ul class="import-column-list">
+            <li class="import-column is-required">Company name</li>
+            <li class="import-column">Contact name</li>
+            <li class="import-column">Phone</li>
+            <li class="import-column">Email</li>
+            <li class="import-column">Industry</li>
+            <li class="import-column">Tool</li>
+            <li class="import-column">Owner</li>
+            <li class="import-column">Brief</li>
+            <li class="import-column">Sales value</li>
+          </ul>
+          <span class="field-hint">
+            Brief is added as the first note in the card’s Activity Log. Owner defaults to you, and
+            sales value defaults to €10,000.
+          </span>
+        </div>
+
+        <p class="import-error" id="importFileError" hidden role="alert"></p>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="importTemplateBtn">
+            Download template
+          </button>
+          <div class="modal-actions-right">
+            <button type="button" class="btn btn-ghost" id="importCancelBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="import-step" id="importStepPreview" hidden>
+        <p class="import-file-name" id="importFileName"></p>
+        <div class="import-summary" id="importSummary"></div>
+        <div class="import-table-wrap">
+          <table class="import-table">
+            <thead>
+              <tr>
+                <th class="import-col-check">
+                  <input type="checkbox" id="importSelectAll" aria-label="Select all importable rows" />
+                </th>
+                <th class="import-col-row">Row</th>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Owner</th>
+                <th>Brief</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="importPreviewBody"></tbody>
+          </table>
+        </div>
+        <div class="import-progress" id="importProgress" hidden>
+          <div class="import-progress-track"><div class="import-progress-bar" id="importProgressBar"></div></div>
+          <span class="import-progress-label" id="importProgressLabel"></span>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="importBackBtn">Choose another file</button>
+          <div class="modal-actions-right">
+            <button type="button" class="btn btn-ghost" id="importPreviewCancelBtn">Cancel</button>
+            <button type="button" class="btn btn-primary" id="importConfirmBtn" disabled>Import</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="import-step" id="importStepResult" hidden>
+        <div class="import-result" id="importResult"></div>
+        <div class="modal-actions modal-actions-stack">
+          <div class="modal-actions-right">
+            <button type="button" class="btn btn-primary" id="importDoneBtn">Done</button>
+          </div>
+          <button type="button" class="btn-text-danger" id="importUndoBtn">Undo this import</button>
+        </div>
+      </div>
     </div>
   </div>
 

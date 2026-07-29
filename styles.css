@@ -3173,3 +3173,363 @@ body.is-card-dragging .card {
   color: var(--accent-hover);
   font-weight: 500;
 }
+
+/* --------------------------- Import prospects --------------------- */
+
+.import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.import-btn-icon {
+  display: none;
+}
+
+.modal-wide {
+  max-width: 880px;
+}
+
+.import-step[hidden] {
+  display: none;
+}
+
+.import-local-warning {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: #e4eef5;
+  border: 1px solid #bfcfda;
+  color: #3f6a82;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.import-local-warning[hidden] {
+  display: none;
+}
+
+.import-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 30px 20px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.import-drop:hover,
+.import-drop:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.import-drop.is-dragover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.import-drop.is-busy {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.import-drop-icon {
+  color: var(--ink-faint);
+}
+
+.import-drop-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.import-drop-hint {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.import-columns {
+  margin-top: 20px;
+}
+
+.import-column-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 8px;
+  padding: 0;
+}
+
+.import-column {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.import-column.is-required {
+  background: var(--accent-soft);
+  border-color: #e6c3b4;
+  color: var(--accent-hover);
+  font-weight: 500;
+}
+
+.import-column.is-required::after {
+  content: " · required";
+  font-weight: 400;
+}
+
+.import-error {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+.import-error[hidden] {
+  display: none;
+}
+
+.import-file-name {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.import-chip,
+.import-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.import-chip.is-new,
+.import-badge.is-new {
+  background: var(--pipeline-green-soft);
+  color: var(--pipeline-green-dark);
+}
+
+.import-chip.is-duplicate,
+.import-badge.is-duplicate {
+  background: #f4e7d3;
+  color: #8a6631;
+}
+
+.import-chip.is-error,
+.import-badge.is-error {
+  background: #f7e8e5;
+  color: var(--danger);
+}
+
+.import-summary-hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--ink-faint);
+  line-height: 1.4;
+}
+
+.import-table-wrap {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  -webkit-overflow-scrolling: touch;
+}
+
+.import-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.import-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 10px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.import-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--ink);
+}
+
+.import-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.import-table input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.import-col-check {
+  width: 36px;
+}
+
+.import-col-row {
+  width: 46px;
+  color: var(--ink-faint);
+}
+
+.import-col-brief {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-company {
+  display: block;
+  font-weight: 500;
+}
+
+.import-cell-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-faint);
+}
+
+.import-row.is-error {
+  background: #fdf4f2;
+}
+
+.import-row.is-excluded {
+  opacity: 0.55;
+}
+
+.import-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.import-progress[hidden] {
+  display: none;
+}
+
+.import-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.import-progress-bar {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.import-progress-label {
+  font-size: 12px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.import-result-headline {
+  margin: 0 0 10px;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.import-result-line {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+#importSelectAll {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  /* Secondary FAB, stacked above the New deal button */
+  .import-btn {
+    position: fixed;
+    right: max(32px, calc(env(safe-area-inset-right) + 22px));
+    bottom: max(104px, calc(env(safe-area-inset-bottom) + 92px));
+    z-index: 35;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+    gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink-soft);
+    box-shadow: var(--shadow-card);
+  }
+
+  .import-btn-label {
+    display: none;
+  }
+
+  .import-btn-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    line-height: 0;
+  }
+
+  .import-btn-icon svg {
+    display: block;
+  }
+
+  .modal-wide {
+    max-width: 100%;
+  }
+
+  .import-table-wrap {
+    max-height: 44vh;
+  }
+}

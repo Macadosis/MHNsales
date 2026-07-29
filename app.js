@@ -3681,6 +3681,867 @@ document.addEventListener("keydown", (e) => {
   if (!dismissOverlay.hidden) closeDismissModal();
   else if (!commitOverlay.hidden) closeCommitModal();
   else if (!overlay.hidden) closeModal();
+  else if (!importOverlay.hidden) closeImportModal();
+});
+
+/* -------------------- Import prospects (Excel / CSV) ------------------- */
+
+const SHEETJS_SRC = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+const IMPORT_MAX_ROWS = 300;
+const IMPORT_MAX_FILE_BYTES = 5 * 1024 * 1024;
+const IMPORT_CHUNK_SIZE = 25;
+
+const IMPORT_COLUMNS = [
+  {
+    key: "company",
+    label: "Company name",
+    aliases: ["company", "account", "organisation", "organization", "business", "firm", "prospect", "ettevote", "nimi"],
+  },
+  {
+    key: "contact",
+    label: "Contact name",
+    aliases: ["contact", "contact person", "person", "kontakt", "kontaktisik"],
+  },
+  {
+    key: "phone",
+    label: "Phone",
+    aliases: ["phone number", "telephone", "tel", "mobile", "telefon"],
+  },
+  {
+    key: "email",
+    label: "Email",
+    aliases: ["e mail", "email address", "mail", "e post"],
+  },
+  {
+    key: "industry",
+    label: "Industry",
+    aliases: ["sector", "vertical", "valdkond", "tegevusala"],
+  },
+  {
+    key: "tool",
+    label: "Tool",
+    aliases: ["product", "service", "toode", "teenus"],
+  },
+  {
+    key: "owner",
+    label: "Owner",
+    aliases: ["deal owner", "sales owner", "sales rep", "responsible", "assignee", "omanik", "vastutaja"],
+  },
+  {
+    key: "brief",
+    label: "Brief",
+    aliases: ["note", "notes", "description", "comment", "comments", "summary", "background", "kirjeldus", "markus"],
+  },
+  {
+    key: "value",
+    label: "Sales value",
+    aliases: ["value", "deal value", "amount", "revenue", "vaartus", "summa"],
+  },
+];
+
+/** Legal-form words ignored when deciding whether two company names are the same. */
+const COMPANY_SUFFIX_WORDS = new Set([
+  "ou", "as", "uab", "sia", "ab", "oy", "oyj", "aps", "asa", "ehf",
+  "ltd", "limited", "llc", "llp", "lp", "inc", "incorporated", "corp", "corporation",
+  "company", "co", "plc",
+  "gmbh", "mbh", "ag", "kg", "kgaa", "ug", "se", "gbr", "ohg",
+  "bv", "nv", "cv", "vof", "sa", "sas", "sarl", "srl", "spa", "sl", "slu",
+  "kft", "zoo", "sp", "doo", "ead", "ood", "eood", "tov",
+]);
+
+const importOverlay = document.getElementById("importOverlay");
+const importLocalWarning = document.getElementById("importLocalWarning");
+const importDropZone = document.getElementById("importDropZone");
+const importFileInput = document.getElementById("importFileInput");
+const importFileError = document.getElementById("importFileError");
+const importFileNameEl = document.getElementById("importFileName");
+const importSummaryEl = document.getElementById("importSummary");
+const importPreviewBody = document.getElementById("importPreviewBody");
+const importSelectAll = document.getElementById("importSelectAll");
+const importConfirmBtn = document.getElementById("importConfirmBtn");
+const importProgressEl = document.getElementById("importProgress");
+const importProgressBar = document.getElementById("importProgressBar");
+const importProgressLabel = document.getElementById("importProgressLabel");
+const importResultEl = document.getElementById("importResult");
+const importUndoBtn = document.getElementById("importUndoBtn");
+const importSteps = {
+  file: document.getElementById("importStepFile"),
+  preview: document.getElementById("importStepPreview"),
+  result: document.getElementById("importStepResult"),
+};
+
+let importRows = [];
+let importTruncated = false;
+let importBusy = false;
+let lastImport = null; // { ids: string[], count: number }
+let sheetJsPromise = null;
+
+function normalizeHeaderKey(raw) {
+  return String(raw ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const IMPORT_HEADER_LOOKUP = new Map();
+for (const column of IMPORT_COLUMNS) {
+  IMPORT_HEADER_LOOKUP.set(normalizeHeaderKey(column.label), column.key);
+  for (const alias of column.aliases) {
+    IMPORT_HEADER_LOOKUP.set(normalizeHeaderKey(alias), column.key);
+  }
+}
+
+/** "Acme Holding OÜ" and "acme holding" collapse to the same key. */
+function normalizeCompanyKey(name) {
+  const words = String(name || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  while (words.length > 1 && COMPANY_SUFFIX_WORDS.has(words[words.length - 1])) {
+    words.pop();
+  }
+  return words.join(" ");
+}
+
+/** Reuse the spelling already on the board so the Owner filter doesn't fragment. */
+function resolveImportOwner(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return getCurrentUserName();
+  const target = value.toLowerCase();
+  for (const deal of deals) {
+    const existing = (deal.owner || "").trim();
+    if (existing && existing.toLowerCase() === target) return existing;
+  }
+  return value;
+}
+
+function parseImportValue(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+  let cleaned = text.replace(/[^0-9.,-]/g, "");
+  if (!cleaned) return null;
+
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
+  if (lastComma > -1 && lastDot > -1) {
+    // Rightmost separator is the decimal point; the other one groups thousands.
+    const decimal = lastComma > lastDot ? "," : ".";
+    const grouping = decimal === "," ? "." : ",";
+    cleaned = cleaned.split(grouping).join("").replace(decimal, ".");
+  } else if (lastComma > -1) {
+    const decimals = cleaned.length - lastComma - 1;
+    cleaned = decimals === 3 ? cleaned.split(",").join("") : cleaned.replace(",", ".");
+  }
+
+  const number = Number(cleaned);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function looksLikeEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+}
+
+function countDigits(value) {
+  return (String(value).match(/\d/g) || []).length;
+}
+
+function loadSheetJs() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (!sheetJsPromise) {
+    sheetJsPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = SHEETJS_SRC;
+      script.async = true;
+      script.onload = () =>
+        window.XLSX ? resolve(window.XLSX) : reject(new Error("Spreadsheet reader did not load"));
+      script.onerror = () => reject(new Error("Spreadsheet reader could not be downloaded"));
+      document.head.appendChild(script);
+    }).catch((err) => {
+      sheetJsPromise = null;
+      throw err;
+    });
+  }
+  return sheetJsPromise;
+}
+
+function detectCsvDelimiter(line) {
+  const counts = [",", ";", "\t"].map((sep) => {
+    let count = 0;
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') quoted = !quoted;
+      else if (ch === sep && !quoted) count++;
+    }
+    return { sep, count };
+  });
+  counts.sort((a, b) => b.count - a.count);
+  return counts[0].count ? counts[0].sep : ",";
+}
+
+function parseCsvText(text) {
+  const clean = text.replace(/^\uFEFF/, "");
+  const firstBreak = clean.search(/\r?\n/);
+  const delimiter = detectCsvDelimiter(firstBreak < 0 ? clean : clean.slice(0, firstBreak));
+
+  const rows = [];
+  let row = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (quoted) {
+      if (ch !== '"') field += ch;
+      else if (clean[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else quoted = false;
+      continue;
+    }
+    if (ch === '"') quoted = true;
+    else if (ch === delimiter) {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (ch !== "\r") field += ch;
+  }
+  row.push(field);
+  rows.push(row);
+  return rows;
+}
+
+async function readSheetRows(file) {
+  const isCsv = /\.csv$/i.test(file.name || "") || file.type === "text/csv";
+  let XLSX = null;
+  try {
+    XLSX = await loadSheetJs();
+  } catch (err) {
+    console.warn("SheetJS unavailable:", err);
+    if (!isCsv) {
+      throw new Error(
+        "Could not load the spreadsheet reader. Check your connection, or save the file as .csv and try again."
+      );
+    }
+  }
+
+  if (!XLSX) return parseCsvText(await file.text());
+
+  const book = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+  const sheetName = book.SheetNames?.[0];
+  const sheet = sheetName ? book.Sheets[sheetName] : null;
+  if (!sheet) throw new Error("That file has no sheets to read.");
+  // raw:false keeps phone numbers, leading zeros and dates as the text you see in Excel.
+  // blankrows:true keeps row numbers aligned with the spreadsheet.
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: true, defval: "", raw: false });
+}
+
+function importCellText(value) {
+  if (value == null) return "";
+  if (value instanceof Date) return toDateInputValue(value.getTime());
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+function buildImportRows(rawRows) {
+  const table = (rawRows || []).map((row) => (Array.isArray(row) ? row.map(importCellText) : []));
+  const headerIndex = table.findIndex((row) => row.some((cell) => cell));
+  if (headerIndex < 0) throw new Error("That file looks empty.");
+
+  const mapping = new Map();
+  const mapped = new Set();
+  table[headerIndex].forEach((cell, index) => {
+    const key = IMPORT_HEADER_LOOKUP.get(normalizeHeaderKey(cell));
+    if (key && !mapped.has(key)) {
+      mapping.set(index, key);
+      mapped.add(key);
+    }
+  });
+
+  if (!mapped.has("company")) {
+    throw new Error(
+      "No “Company name” column in the first row. Rename that column, or download the template."
+    );
+  }
+
+  const rows = [];
+  let truncated = false;
+  for (let i = headerIndex + 1; i < table.length; i++) {
+    const cells = table[i];
+    if (!cells.some((cell) => cell)) continue;
+    if (rows.length >= IMPORT_MAX_ROWS) {
+      truncated = true;
+      break;
+    }
+    const values = {};
+    for (const [index, key] of mapping) values[key] = cells[index] || "";
+    rows.push({
+      rowNumber: i + 1,
+      values,
+      value: parseImportValue(values.value),
+      errors: [],
+      warnings: [],
+      duplicate: null,
+      status: "new",
+      include: true,
+    });
+  }
+
+  return { rows, truncated };
+}
+
+function classifyImportRows(rows) {
+  const existing = new Map();
+  for (const deal of deals) {
+    const key = normalizeCompanyKey(deal.company);
+    if (!key) continue;
+    const entry = existing.get(key) || { active: null, dismissed: null };
+    if (deal.stage === "dismissed") entry.dismissed = entry.dismissed || deal;
+    else entry.active = entry.active || deal;
+    existing.set(key, entry);
+  }
+
+  const seenInFile = new Map();
+  for (const row of rows) {
+    row.errors = [];
+    row.warnings = [];
+    row.duplicate = null;
+
+    if (!row.values.company) row.errors.push("Missing company name");
+    if (row.values.email && !looksLikeEmail(row.values.email)) {
+      row.warnings.push("Email looks invalid");
+    }
+    if (row.values.phone && countDigits(row.values.phone) < 6) {
+      row.warnings.push("Phone looks incomplete");
+    }
+    if (row.values.value && row.value == null) {
+      row.warnings.push("Unreadable value — using €10,000");
+    }
+
+    const key = normalizeCompanyKey(row.values.company);
+    if (key) {
+      const earlierRow = seenInFile.get(key);
+      if (earlierRow) {
+        row.duplicate = { kind: "file", row: earlierRow };
+      } else {
+        const entry = existing.get(key);
+        if (entry?.active) row.duplicate = { kind: "board", deal: entry.active };
+        else if (entry?.dismissed) row.duplicate = { kind: "history", deal: entry.dismissed };
+        seenInFile.set(key, row.rowNumber);
+      }
+    }
+
+    row.status = row.errors.length ? "error" : row.duplicate ? "duplicate" : "new";
+    row.include = row.status === "new";
+  }
+  return rows;
+}
+
+function importStatusLabel(row) {
+  if (row.status === "error") return "Error";
+  if (row.status === "duplicate") return "Duplicate";
+  return row.warnings.length ? "Check" : "New";
+}
+
+function importStatusDetail(row) {
+  if (row.errors.length) return row.errors.join(" · ");
+  const parts = [];
+  if (row.duplicate?.kind === "file") {
+    parts.push(`Same company as row ${row.duplicate.row}`);
+  } else if (row.duplicate?.kind === "board") {
+    const deal = row.duplicate.deal;
+    const stage = STAGES.find((s) => s.id === deal.stage)?.label || deal.stage;
+    parts.push(deal.owner ? `Already on the board — ${stage} · ${deal.owner}` : `Already on the board — ${stage}`);
+  } else if (row.duplicate?.kind === "history") {
+    parts.push("Dismissed earlier — see History");
+  }
+  parts.push(...row.warnings);
+  return parts.join(" · ");
+}
+
+function setImportStep(step) {
+  for (const [name, el] of Object.entries(importSteps)) {
+    if (el) el.hidden = name !== step;
+  }
+}
+
+function showImportError(message) {
+  importFileError.textContent = message || "";
+  importFileError.hidden = !message;
+}
+
+function importSelectableRows() {
+  return importRows.filter((row) => row.status !== "error");
+}
+
+function renderImportSummary() {
+  const counts = { new: 0, duplicate: 0, error: 0 };
+  for (const row of importRows) counts[row.status]++;
+
+  importSummaryEl.innerHTML = "";
+  const chips = [
+    { cls: "is-new", label: `${counts.new} new`, show: true },
+    { cls: "is-duplicate", label: `${counts.duplicate} duplicate${counts.duplicate === 1 ? "" : "s"}`, show: counts.duplicate > 0 },
+    { cls: "is-error", label: `${counts.error} error${counts.error === 1 ? "" : "s"}`, show: counts.error > 0 },
+  ];
+  for (const chip of chips) {
+    if (!chip.show) continue;
+    const el = document.createElement("span");
+    el.className = `import-chip ${chip.cls}`;
+    el.textContent = chip.label;
+    importSummaryEl.appendChild(el);
+  }
+
+  const hints = [];
+  if (counts.duplicate) hints.push("Duplicates are unticked — tick one to import it anyway.");
+  if (counts.error) hints.push("Rows without a company name cannot be imported.");
+  if (importTruncated) hints.push(`Only the first ${IMPORT_MAX_ROWS} rows were read.`);
+  if (hints.length) {
+    const hint = document.createElement("span");
+    hint.className = "import-summary-hint";
+    hint.textContent = hints.join(" ");
+    importSummaryEl.appendChild(hint);
+  }
+}
+
+function updateImportConfirmState() {
+  const selected = importRows.filter((row) => row.include && row.status !== "error");
+  importConfirmBtn.textContent = selected.length
+    ? `Import ${selected.length} prospect${selected.length === 1 ? "" : "s"}`
+    : "Import";
+  importConfirmBtn.disabled = importBusy || !selected.length;
+
+  const selectable = importSelectableRows();
+  const checked = selectable.filter((row) => row.include).length;
+  importSelectAll.disabled = importBusy || !selectable.length;
+  importSelectAll.checked = Boolean(selectable.length) && checked === selectable.length;
+  importSelectAll.indeterminate = checked > 0 && checked < selectable.length;
+}
+
+function renderImportPreview() {
+  importPreviewBody.innerHTML = "";
+
+  for (const row of importRows) {
+    const tr = document.createElement("tr");
+    tr.className = `import-row is-${row.status}`;
+
+    const checkCell = document.createElement("td");
+    checkCell.className = "import-col-check";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = row.include && row.status !== "error";
+    checkbox.disabled = row.status === "error";
+    checkbox.setAttribute("aria-label", `Import row ${row.rowNumber}`);
+    checkbox.addEventListener("change", () => {
+      row.include = checkbox.checked;
+      tr.classList.toggle("is-excluded", !checkbox.checked);
+      updateImportConfirmState();
+    });
+    checkCell.appendChild(checkbox);
+    tr.classList.toggle("is-excluded", !checkbox.checked);
+
+    const rowCell = document.createElement("td");
+    rowCell.className = "import-col-row";
+    rowCell.textContent = row.rowNumber;
+
+    const companyCell = document.createElement("td");
+    const companyName = document.createElement("span");
+    companyName.className = "import-company";
+    companyName.textContent = row.values.company || "—";
+    companyCell.appendChild(companyName);
+    const meta = [row.values.email, row.values.phone, row.values.industry, row.values.tool]
+      .filter(Boolean)
+      .join(" · ");
+    if (meta) {
+      const metaEl = document.createElement("span");
+      metaEl.className = "import-cell-meta";
+      metaEl.textContent = meta;
+      companyCell.appendChild(metaEl);
+    }
+
+    const contactCell = document.createElement("td");
+    contactCell.textContent = row.values.contact || "—";
+
+    const ownerCell = document.createElement("td");
+    ownerCell.textContent = resolveImportOwner(row.values.owner) || "—";
+
+    const briefCell = document.createElement("td");
+    briefCell.className = "import-col-brief";
+    if (row.values.brief) {
+      briefCell.textContent = row.values.brief;
+      briefCell.title = row.values.brief;
+    } else {
+      briefCell.textContent = "—";
+    }
+
+    const statusCell = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = `import-badge is-${row.status}`;
+    badge.textContent = importStatusLabel(row);
+    statusCell.appendChild(badge);
+    const detail = importStatusDetail(row);
+    if (detail) {
+      const detailEl = document.createElement("span");
+      detailEl.className = "import-cell-meta";
+      detailEl.textContent = detail;
+      statusCell.appendChild(detailEl);
+    }
+
+    tr.append(checkCell, rowCell, companyCell, contactCell, ownerCell, briefCell, statusCell);
+    importPreviewBody.appendChild(tr);
+  }
+
+  renderImportSummary();
+  updateImportConfirmState();
+}
+
+function setImportProgress(done, total) {
+  importProgressEl.hidden = false;
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  importProgressBar.style.width = `${percent}%`;
+  importProgressLabel.textContent = `Uploaded ${done} of ${total}`;
+}
+
+function setImportBusy(busy) {
+  importBusy = busy;
+  for (const id of ["importBackBtn", "importPreviewCancelBtn", "importCloseBtn", "importDoneBtn"]) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = busy;
+  }
+  importUndoBtn.disabled = busy;
+  importDropZone.classList.toggle("is-busy", busy);
+  updateImportConfirmState();
+}
+
+async function runImport() {
+  if (importBusy) return;
+  const rows = importRows.filter((row) => row.include && row.status !== "error");
+  if (!rows.length) return;
+
+  setImportBusy(true);
+  importConfirmBtn.textContent = "Importing…";
+
+  const baseOrder = nextBoardOrder("prospects");
+  const created = rows.map((row, index) => {
+    const createdAt = Date.now();
+    const notes = [makeDealCreationNote(createdAt)];
+    if (row.values.brief) {
+      // +1ms so migrateDeals doesn't mistake the brief for the creation note.
+      notes.push({
+        id: crypto.randomUUID(),
+        text: row.values.brief,
+        createdAt: createdAt + 1,
+        updatedAt: createdAt + 1,
+      });
+    }
+    return {
+      id: crypto.randomUUID(),
+      company: row.values.company,
+      contact: row.values.contact || "",
+      phone: row.values.phone || "",
+      email: row.values.email || "",
+      industry: row.values.industry || "",
+      tool: row.values.tool || "",
+      value: row.value != null ? row.value : DEFAULT_VALUE,
+      owner: resolveImportOwner(row.values.owner),
+      stage: "prospects",
+      createdAt,
+      boardOrder: baseOrder + index,
+      notes,
+      tasks: [],
+    };
+  });
+
+  deals.push(...created);
+  render();
+
+  const ids = created.map((deal) => deal.id);
+  const api = window.MHN_DB;
+  let uploaded = 0;
+  let syncError = null;
+
+  if (api?.upsertDealsAsync) {
+    setImportProgress(0, created.length);
+    for (let i = 0; i < created.length; i += IMPORT_CHUNK_SIZE) {
+      const chunk = created.slice(i, i + IMPORT_CHUNK_SIZE);
+      // Cloud rows are written one by one; keep realtime echoes from rebuilding mid-upload.
+      suppressRemoteRefreshUntil = Date.now() + 5000;
+      try {
+        applySaveResult(await api.upsertDealsAsync(chunk, deals));
+      } catch (err) {
+        console.error(err);
+        syncError = err;
+        break;
+      }
+      uploaded += chunk.length;
+      setImportProgress(uploaded, created.length);
+    }
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
+  }
+
+  suppressRemoteRefreshUntil = Date.now() + 1500;
+  lastImport = { ids, count: created.length };
+  setImportBusy(false);
+  importProgressEl.hidden = true;
+  render();
+
+  const skipped = importRows.length - created.length;
+  showImportResult({ created: created.length, skipped, syncError, uploaded });
+}
+
+function showImportResult({ created, skipped, syncError, uploaded }) {
+  importResultEl.innerHTML = "";
+
+  const headline = document.createElement("p");
+  headline.className = "import-result-headline";
+  headline.textContent = `${created} prospect${created === 1 ? "" : "s"} added to Prospects.`;
+  importResultEl.appendChild(headline);
+
+  const lines = [];
+  if (skipped > 0) {
+    lines.push(`${skipped} row${skipped === 1 ? "" : "s"} skipped (duplicates or errors).`);
+  }
+  const api = window.MHN_DB;
+  if (syncError) {
+    lines.push(
+      `${created - uploaded} card${created - uploaded === 1 ? "" : "s"} could not be uploaded — ` +
+        "they are saved locally and will sync when the cloud reconnects."
+    );
+  } else if (api?.isRemote && api.cloudWriteAllowedByOrigin === false) {
+    lines.push("Local / preview mode — the cards were not uploaded to the cloud.");
+  } else if (api?.isRemote) {
+    lines.push("All cards synced to the cloud.");
+  }
+
+  for (const text of lines) {
+    const p = document.createElement("p");
+    p.className = "import-result-line";
+    p.textContent = text;
+    importResultEl.appendChild(p);
+  }
+
+  importUndoBtn.hidden = !lastImport;
+  importUndoBtn.textContent = "Undo this import";
+  setImportStep("result");
+}
+
+async function undoLastImport() {
+  if (!lastImport || importBusy) return;
+  const { ids, count } = lastImport;
+
+  setImportBusy(true);
+  importUndoBtn.textContent = "Undoing…";
+
+  const removing = new Set(ids);
+  deals = deals.filter((deal) => !removing.has(deal.id));
+  render();
+
+  const api = window.MHN_DB;
+  let failed = 0;
+  if (api?.deleteDealAsync) {
+    for (const id of ids) {
+      suppressRemoteRefreshUntil = Date.now() + 5000;
+      try {
+        await api.deleteDealAsync(id, deals);
+      } catch (err) {
+        console.error(err);
+        failed++;
+      }
+    }
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
+  }
+
+  suppressRemoteRefreshUntil = Date.now() + 1500;
+  lastImport = null;
+  setImportBusy(false);
+  render();
+  closeImportModal({ force: true });
+  showSyncStatus(
+    failed
+      ? `Import undone locally — ${failed} card${failed === 1 ? "" : "s"} still pending removal in the cloud.`
+      : `Import undone — ${count} card${count === 1 ? "" : "s"} removed.`,
+    Boolean(failed),
+    Boolean(failed)
+  );
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",;\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadImportTemplate() {
+  const headers = IMPORT_COLUMNS.map((column) => column.label);
+  const example = [
+    "Acme GmbH",
+    "Jane Doe",
+    "+49 170 000 0000",
+    "jane@acme.com",
+    "Manufacturing",
+    "Obsidian",
+    getCurrentUserName(),
+    "Met at the trade fair — wants a demo after summer.",
+    String(DEFAULT_VALUE),
+  ];
+
+  try {
+    const XLSX = await loadSheetJs();
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers, example]), "Prospects");
+    const buffer = XLSX.write(book, { type: "array", bookType: "xlsx" });
+    downloadBlob(
+      "mhn-prospects-template.xlsx",
+      new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+    );
+    return;
+  } catch (err) {
+    console.warn("Falling back to a CSV template:", err);
+  }
+
+  const csv = [headers, example].map((row) => row.map(csvCell).join(",")).join("\r\n");
+  downloadBlob(
+    "mhn-prospects-template.csv",
+    new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })
+  );
+}
+
+async function handleImportFile(file) {
+  if (!file || importBusy) return;
+  showImportError("");
+
+  if (!/\.(xlsx|xlsm|xls|csv)$/i.test(file.name || "")) {
+    showImportError("Unsupported file type. Use .xlsx, .xls or .csv.");
+    return;
+  }
+  if (file.size > IMPORT_MAX_FILE_BYTES) {
+    showImportError("That file is over 5 MB. Split it into smaller batches.");
+    return;
+  }
+
+  importDropZone.classList.add("is-busy");
+  try {
+    const { rows, truncated } = buildImportRows(await readSheetRows(file));
+    if (!rows.length) {
+      showImportError("No data rows found under the header row.");
+      return;
+    }
+    importRows = classifyImportRows(rows);
+    importTruncated = truncated;
+    importFileNameEl.textContent = file.name;
+    renderImportPreview();
+    setImportStep("preview");
+  } catch (err) {
+    console.error(err);
+    showImportError(err?.message || "Could not read that file.");
+  } finally {
+    importDropZone.classList.remove("is-busy");
+    importFileInput.value = "";
+  }
+}
+
+function resetImportState() {
+  importRows = [];
+  importTruncated = false;
+  lastImport = null;
+  importFileInput.value = "";
+  importPreviewBody.innerHTML = "";
+  importProgressEl.hidden = true;
+  importProgressBar.style.width = "0%";
+  showImportError("");
+  setImportBusy(false);
+}
+
+function openImportModal() {
+  resetImportState();
+  const api = window.MHN_DB;
+  importLocalWarning.hidden = !(api?.isRemote && api.cloudWriteAllowedByOrigin === false);
+  setImportStep("file");
+  importOverlay.hidden = false;
+  importDropZone.focus();
+}
+
+function closeImportModal({ force = false } = {}) {
+  if (importBusy && !force) return;
+  importOverlay.hidden = true;
+  resetImportState();
+  setImportStep("file");
+}
+
+document.getElementById("importDealsBtn").addEventListener("click", openImportModal);
+document.getElementById("importCloseBtn").addEventListener("click", () => closeImportModal());
+document.getElementById("importCancelBtn").addEventListener("click", () => closeImportModal());
+document.getElementById("importPreviewCancelBtn").addEventListener("click", () => closeImportModal());
+document.getElementById("importDoneBtn").addEventListener("click", () => closeImportModal());
+document.getElementById("importTemplateBtn").addEventListener("click", downloadImportTemplate);
+document.getElementById("importBackBtn").addEventListener("click", () => {
+  if (importBusy) return;
+  resetImportState();
+  setImportStep("file");
+});
+importConfirmBtn.addEventListener("click", runImport);
+importUndoBtn.addEventListener("click", undoLastImport);
+
+importOverlay.addEventListener("click", (e) => {
+  if (e.target === importOverlay) closeImportModal();
+});
+
+importSelectAll.addEventListener("change", () => {
+  const checked = importSelectAll.checked;
+  for (const row of importSelectableRows()) row.include = checked;
+  renderImportPreview();
+});
+
+importDropZone.addEventListener("click", () => importFileInput.click());
+importDropZone.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    importFileInput.click();
+  }
+});
+importFileInput.addEventListener("change", () => {
+  const file = importFileInput.files?.[0];
+  if (file) handleImportFile(file);
+});
+
+for (const type of ["dragenter", "dragover"]) {
+  importDropZone.addEventListener(type, (e) => {
+    e.preventDefault();
+    importDropZone.classList.add("is-dragover");
+  });
+}
+for (const type of ["dragleave", "dragend"]) {
+  importDropZone.addEventListener(type, () => importDropZone.classList.remove("is-dragover"));
+}
+importDropZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  importDropZone.classList.remove("is-dragover");
+  const file = e.dataTransfer?.files?.[0];
+  if (file) handleImportFile(file);
 });
 
 /* ------------------------------ Tabs ---------------------------- */
@@ -3876,6 +4737,7 @@ async function startApp() {
     api.subscribeToDealChanges(() => {
       if (syncingFromRemote) return;
       if (!overlay.hidden || !commitOverlay.hidden || !dismissOverlay.hidden) return;
+      if (!importOverlay.hidden) return;
       refreshDealsFromRemote();
     });
   }
