@@ -111,6 +111,12 @@ const tasksSearchBubble = document.getElementById("tasksSearchBubble");
 const pipelineSearchInput = document.getElementById("pipelineSearchInput");
 const pipelineSearchClearBtn = document.getElementById("pipelineSearchClearBtn");
 const pipelineSearchBubble = document.getElementById("pipelineSearchBubble");
+const dashboardFiltersEl = document.getElementById("dashboardFilters");
+const dashboardClearFiltersBtn = document.getElementById("dashboardClearFiltersBtn");
+const dashboardBodyEl = document.getElementById("dashboardBody");
+const dashboardSearchInput = document.getElementById("dashboardSearchInput");
+const dashboardSearchClearBtn = document.getElementById("dashboardSearchClearBtn");
+const dashboardSearchBubble = document.getElementById("dashboardSearchBubble");
 const searchSuggestionState = new Map();
 const tasksListLayout = document.getElementById("tasksListLayout");
 const tasksPipelineLayout = document.getElementById("tasksPipelineLayout");
@@ -1176,6 +1182,7 @@ function renderFilters(containerEl, clearBtn) {
 document.addEventListener("click", closeFilterMenus);
 clearFiltersBtn.addEventListener("click", clearFilters);
 pipelineClearFiltersBtn.addEventListener("click", clearFilters);
+dashboardClearFiltersBtn.addEventListener("click", clearFilters);
 
 /* ------------------------------ Search ------------------------- */
 
@@ -1187,6 +1194,7 @@ const SEARCH_FIELDS = [
   { source: "board", input: searchInput, bubble: searchBubble, clearBtn: searchClearBtn, listId: "searchSuggestions" },
   { source: "pipeline", input: pipelineSearchInput, bubble: pipelineSearchBubble, clearBtn: pipelineSearchClearBtn, listId: "pipelineSearchSuggestions" },
   { source: "tasks", input: tasksSearchInput, bubble: tasksSearchBubble, clearBtn: tasksSearchClearBtn, listId: "tasksSearchSuggestions" },
+  { source: "dashboard", input: dashboardSearchInput, bubble: dashboardSearchBubble, clearBtn: dashboardSearchClearBtn, listId: "dashboardSearchSuggestions" },
 ].filter((field) => field.input);
 
 function applySearch(value, { source, skipSuggestions = false } = {}) {
@@ -1474,6 +1482,9 @@ function render() {
   } else if (activeTab === "pipeline") {
     renderFilters(pipelineFiltersEl, pipelineClearFiltersBtn);
     renderPipeline();
+  } else if (activeTab === "dashboard") {
+    renderFilters(dashboardFiltersEl, dashboardClearFiltersBtn);
+    renderDashboard();
   } else if (activeTab === "history") {
     renderHistory();
   } else if (activeTab === "tasks") {
@@ -2006,6 +2017,228 @@ function renderCard(deal) {
 
   attachCardPointerDrag(card, deal);
 
+  return card;
+}
+
+/* ------------------------------ Dashboard ---------------------- */
+
+const DISMISSED_STAGE = { id: "dismissed", label: "Dismissed" };
+
+/* Approximate success rate: deals that said yes over every deal that reached a
+   decision. Failed deals are excluded — they never got a yes or a no. */
+const SUCCESS_WON_STAGES = ["committed", "paid"];
+const SUCCESS_CONSIDERED_STAGES = ["prospects", "interested", "dismissed", "committed", "paid"];
+
+function sumDealValue(list) {
+  return list.reduce((sum, deal) => sum + (Number(deal.value) || 0), 0);
+}
+
+function getDismissedDealsMatchingFilters() {
+  return getDismissedDeals().filter((deal) => matchesFilters(deal) && matchesSearch(deal));
+}
+
+function formatShare(part, total) {
+  if (!total) return "0%";
+  const pct = (part / total) * 100;
+  if (pct > 0 && pct < 1) return "<1%";
+  return `${Math.round(pct)}%`;
+}
+
+function getDashboardStats() {
+  const active = getFilteredDeals();
+  const dismissedDeals = getDismissedDealsMatchingFilters();
+
+  const stages = [...STAGES, DISMISSED_STAGE].map(({ id, label }) => {
+    const stageDeals =
+      id === DISMISSED_STAGE.id ? dismissedDeals : active.filter((deal) => deal.stage === id);
+    return { id, label, count: stageDeals.length, value: sumDealValue(stageDeals) };
+  });
+
+  const countByStage = new Map(stages.map((stage) => [stage.id, stage.count]));
+  const sumStages = (ids) => ids.reduce((sum, id) => sum + (countByStage.get(id) || 0), 0);
+
+  const won = sumStages(SUCCESS_WON_STAGES);
+  const considered = sumStages(SUCCESS_CONSIDERED_STAGES);
+
+  return {
+    activeStages: stages.filter((stage) => stage.id !== DISMISSED_STAGE.id),
+    dismissed: stages.find((stage) => stage.id === DISMISSED_STAGE.id),
+    activeCount: active.length,
+    activeValue: sumDealValue(active),
+    won,
+    considered,
+    successRate: considered ? (won / considered) * 100 : null,
+  };
+}
+
+function dashEl(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function dashCard(modifier) {
+  return dashEl("section", `dash-card ${modifier}`);
+}
+
+function dashFigure(count) {
+  const figure = dashEl("div", "dash-figure");
+  figure.append(
+    dashEl("span", "dash-figure-value", String(count)),
+    dashEl("span", "dash-figure-unit", count === 1 ? "card" : "cards")
+  );
+  return figure;
+}
+
+function renderDashboard() {
+  dashboardBodyEl.innerHTML = "";
+  const stats = getDashboardStats();
+  const totalCards = stats.activeCount + stats.dismissed.count;
+
+  if (!totalCards) {
+    const narrowed = hasActiveFilters() || searchQuery;
+    dashboardBodyEl.appendChild(
+      dashEl(
+        "p",
+        "dash-empty",
+        narrowed
+          ? "No deals match the current filters."
+          : "No deals yet — create one on the Board and the numbers will show up here."
+      )
+    );
+    return;
+  }
+
+  const grid = dashEl("div", "dashboard-grid");
+  const side = dashEl("div", "dashboard-side");
+  side.append(renderDashDismissedCard(stats, totalCards), renderDashSuccessCard(stats));
+  grid.append(renderDashActiveCard(stats), side);
+  dashboardBodyEl.appendChild(grid);
+}
+
+function renderDashActiveCard(stats) {
+  const card = dashCard("dash-card-hero");
+
+  const head = dashEl("header", "dash-card-head");
+  head.append(
+    dashEl("h2", "dash-label", "Active deal cards"),
+    dashEl("span", "dash-card-note", fmtEuro.format(stats.activeValue))
+  );
+
+  card.append(head, dashFigure(stats.activeCount), renderDashStageBar(stats));
+
+  const list = dashEl("ul", "dash-stage-list");
+  for (const stage of stats.activeStages) {
+    list.appendChild(renderDashStageRow(stage, stats.activeCount));
+  }
+  card.appendChild(list);
+
+  return card;
+}
+
+function renderDashStageBar(stats) {
+  const bar = dashEl("div", "dash-bar");
+  bar.setAttribute("role", "img");
+  bar.setAttribute(
+    "aria-label",
+    stats.activeStages.map((stage) => `${stage.label}: ${stage.count}`).join(", ")
+  );
+
+  for (const stage of stats.activeStages) {
+    if (!stage.count) continue;
+    const segment = dashEl("span", "dash-bar-seg");
+    segment.dataset.stage = stage.id;
+    segment.style.flexGrow = String(stage.count);
+    segment.title = `${stage.label} — ${stage.count} (${formatShare(stage.count, stats.activeCount)})`;
+    bar.appendChild(segment);
+  }
+
+  return bar;
+}
+
+function renderDashStageRow(stage, total) {
+  const item = dashEl("li", "dash-stage");
+  item.dataset.stage = stage.id;
+
+  const dot = dashEl("span", "dash-dot");
+  const track = dashEl("div", "dash-stage-track");
+  const fill = dashEl("span", "dash-stage-fill");
+  fill.style.width = total ? `${(stage.count / total) * 100}%` : "0%";
+  track.appendChild(fill);
+
+  item.append(
+    dot,
+    dashEl("span", "dash-stage-label", stage.label),
+    track,
+    dashEl("span", "dash-stage-count", String(stage.count)),
+    dashEl("span", "dash-stage-share", formatShare(stage.count, total)),
+    dashEl("span", "dash-stage-value", fmtEuro.format(stage.value))
+  );
+  return item;
+}
+
+function renderDashDismissedCard(stats, totalCards) {
+  const card = dashCard("dash-card-dismissed");
+  card.dataset.stage = DISMISSED_STAGE.id;
+
+  const head = dashEl("header", "dash-card-head");
+  head.append(
+    dashEl("h2", "dash-label", "Dismissed deals"),
+    dashEl("span", "dash-card-note", fmtEuro.format(stats.dismissed.value))
+  );
+
+  const track = dashEl("div", "dash-stage-track");
+  const fill = dashEl("span", "dash-stage-fill");
+  fill.style.width = `${(stats.dismissed.count / totalCards) * 100}%`;
+  track.appendChild(fill);
+
+  card.append(
+    head,
+    dashFigure(stats.dismissed.count),
+    track,
+    dashEl(
+      "p",
+      "dash-note",
+      `${formatShare(stats.dismissed.count, totalCards)} of all ${totalCards} deal cards ever created.`
+    )
+  );
+  return card;
+}
+
+function renderDashSuccessCard(stats) {
+  const card = dashCard("dash-card-success");
+
+  const head = dashEl("header", "dash-card-head");
+  head.append(dashEl("h2", "dash-label", "Approx. success rate"));
+
+  const donut = dashEl("div", "dash-donut");
+  donut.style.setProperty("--pct", String(stats.successRate ?? 0));
+  donut.append(
+    dashEl(
+      "span",
+      "dash-donut-value",
+      stats.successRate === null ? "—" : formatShare(stats.won, stats.considered)
+    )
+  );
+
+  const donutWrap = dashEl("div", "dash-donut-wrap");
+  const legend = dashEl("div", "dash-donut-legend");
+  legend.append(
+    dashEl("span", "dash-donut-won", `${stats.won} won`),
+    dashEl("span", "dash-donut-total", `of ${stats.considered} decided`)
+  );
+  donutWrap.append(donut, legend);
+
+  card.append(
+    head,
+    donutWrap,
+    dashEl(
+      "p",
+      "dash-note",
+      "Won = Committed + Paid. Decided = Prospects + Interested + Dismissed + Committed + Paid. Failed deals are left out."
+    )
+  );
   return card;
 }
 

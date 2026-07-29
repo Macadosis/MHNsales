@@ -265,9 +265,36 @@
         </div>
       </div>
     </section>
-    <section id="view-dashboard" class="view placeholder-view" hidden>
-      <h2 class="placeholder-title">Dashboard</h2>
-      <p class="placeholder-text">This view is coming soon.</p>
+    <section id="view-dashboard" class="view" hidden>
+      <div class="dashboard-toolbar" id="dashboardToolbar">
+        <div class="toolbar-scroll">
+          <div class="filters" id="dashboardFilters"></div>
+          <div class="search-anchor">
+            <div class="search-bubble" id="dashboardSearchBubble">
+              <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+                <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <input
+                type="search"
+                id="dashboardSearchInput"
+                class="search-input"
+                placeholder="Search deals"
+                aria-label="Search deals by name"
+                autocomplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="dashboardSearchSuggestions"
+              />
+              <button type="button" class="search-clear" id="dashboardSearchClearBtn" aria-label="Clear search" aria-hidden="true" tabindex="-1">&times;</button>
+            </div>
+            <ul class="combobox-suggestions search-suggestions" id="dashboardSearchSuggestions" role="listbox" hidden></ul>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="dashboardClearFiltersBtn" hidden>Clear filters</button>
+        </div>
+      </div>
+      <div class="dashboard-body" id="dashboardBody"></div>
     </section>
     <section id="view-history" class="view" hidden>
       <div class="history-header">
