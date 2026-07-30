@@ -1833,10 +1833,13 @@ function pushPipelineAxisTextClear(el, todayLeft, todayRight, todayMid) {
 
 function hidePipelineTooltip() {
   const tip = document.getElementById("pipelineTooltip");
-  if (tip) tip.hidden = true;
+  if (tip) {
+    tip.hidden = true;
+    delete tip.dataset.tipKey;
+  }
 }
 
-function showPipelineTooltip(bar, text) {
+function showPipelineTooltip(bar, deal, barStart, barEnd, event) {
   let tip = document.getElementById("pipelineTooltip");
   if (!tip) {
     tip = document.createElement("div");
@@ -1846,16 +1849,53 @@ function showPipelineTooltip(bar, text) {
     document.body.appendChild(tip);
   }
 
-  tip.textContent = text;
+  const tipKey = `${deal.id}:${barStart}:${barEnd}`;
+  if (tip.dataset.tipKey !== tipKey) {
+    tip.dataset.tipKey = tipKey;
+    tip.innerHTML = "";
+
+    const title = document.createElement("div");
+    title.className = "pipeline-tooltip-title";
+    title.textContent = deal.company || "Untitled deal";
+    tip.appendChild(title);
+
+    const rows = [
+      deal.tool ? ["Tool", deal.tool] : null,
+      ["Duration", `${deal.implementationDays} days`],
+      [
+        "Dates",
+        `${formatMonthDay(new Date(barStart))} – ${formatMonthDay(new Date(barEnd - MS_DAY))}`,
+      ],
+    ].filter(Boolean);
+
+    for (const [label, value] of rows) {
+      const row = document.createElement("div");
+      row.className = "pipeline-tooltip-row";
+
+      const labelEl = document.createElement("span");
+      labelEl.className = "pipeline-tooltip-label";
+      labelEl.textContent = label;
+
+      const valueEl = document.createElement("span");
+      valueEl.className = "pipeline-tooltip-value";
+      valueEl.textContent = value;
+
+      row.append(labelEl, valueEl);
+      tip.appendChild(row);
+    }
+  }
+
   tip.hidden = false;
 
   const rect = bar.getBoundingClientRect();
-  const tipWidth = tip.offsetWidth || 240;
-  const tipHeight = tip.offsetHeight || 36;
-  let left = rect.left + rect.width / 2 - tipWidth / 2;
-  let top = rect.top - tipHeight - 10;
+  const tipWidth = tip.offsetWidth || 220;
+  const tipHeight = tip.offsetHeight || 96;
+  const pointerX = Number.isFinite(event?.clientX) ? event.clientX : rect.left + rect.width / 2;
+  const pointerY = Number.isFinite(event?.clientY) ? event.clientY : rect.top;
+  let left = pointerX - tipWidth / 2;
+  let top = pointerY - tipHeight - 12;
   left = Math.max(8, Math.min(left, window.innerWidth - tipWidth - 8));
-  if (top < 8) top = rect.bottom + 10;
+  if (top < 8) top = pointerY + 16;
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
 }
@@ -1959,12 +1999,6 @@ function renderPipeline() {
     bar.style.left = `${left}%`;
     bar.style.width = `${width}%`;
     bar.style.top = `${deal._pipelineRow * PIPELINE_ROW_HEIGHT + PIPELINE_BAR_TOP}px`;
-    const tipText = [
-      deal.company,
-      deal.tool,
-      `${deal.implementationDays} days`,
-      `${formatMonthDay(new Date(barStart))} – ${formatMonthDay(new Date(barEnd - MS_DAY))}`,
-    ].filter(Boolean).join(" · ");
 
     const text = document.createElement("span");
     text.className = "pipeline-bar-text";
@@ -1990,10 +2024,10 @@ function renderPipeline() {
 
     text.append(label, duration);
     bar.append(text);
-    bar.addEventListener("mouseenter", () => showPipelineTooltip(bar, tipText));
-    bar.addEventListener("mousemove", () => showPipelineTooltip(bar, tipText));
+    bar.addEventListener("mouseenter", (e) => showPipelineTooltip(bar, deal, barStart, barEnd, e));
+    bar.addEventListener("mousemove", (e) => showPipelineTooltip(bar, deal, barStart, barEnd, e));
     bar.addEventListener("mouseleave", hidePipelineTooltip);
-    bar.addEventListener("focus", () => showPipelineTooltip(bar, tipText));
+    bar.addEventListener("focus", () => showPipelineTooltip(bar, deal, barStart, barEnd));
     bar.addEventListener("blur", hidePipelineTooltip);
     bar.addEventListener("click", () => openModal({ deal }));
     pipelineRowsEl.appendChild(bar);
