@@ -22,6 +22,8 @@ const MS_DAY = 86400000;
 const PIPELINE_ROW_HEIGHT = 56;
 const PIPELINE_BAR_HEIGHT = 36;
 const PIPELINE_BAR_TOP = (PIPELINE_ROW_HEIGHT - PIPELINE_BAR_HEIGHT) / 2;
+/** Matches `.pipeline-row-divider` left/right inset so cut-off bars align with the gray lines. */
+const PIPELINE_EDGE_INSET = 16;
 const TASKS_PIPELINE_ROW_HEIGHT = Math.round(PIPELINE_ROW_HEIGHT * 0.75); // 42
 const TASKS_PIPELINE_BAR_HEIGHT = Math.round(PIPELINE_BAR_HEIGHT * 0.75); // 27
 const TASKS_PIPELINE_BAR_TOP = (TASKS_PIPELINE_ROW_HEIGHT - TASKS_PIPELINE_BAR_HEIGHT) / 2;
@@ -1996,9 +1998,27 @@ function renderPipeline() {
     const bar = document.createElement("button");
     bar.type = "button";
     bar.className = "pipeline-bar";
-    bar.style.left = `${left}%`;
-    bar.style.width = `${width}%`;
+    const continuesStart = barStart < periodStart;
+    const continuesEnd = barEnd > periodEnd;
+    if (continuesStart) bar.classList.add("continues-start");
+    if (continuesEnd) bar.classList.add("continues-end");
     bar.style.top = `${deal._pipelineRow * PIPELINE_ROW_HEIGHT + PIPELINE_BAR_TOP}px`;
+
+    if (continuesStart && continuesEnd) {
+      bar.style.left = `${PIPELINE_EDGE_INSET}px`;
+      bar.style.right = `${PIPELINE_EDGE_INSET}px`;
+      bar.style.width = "auto";
+    } else if (continuesEnd) {
+      bar.style.left = `${left}%`;
+      bar.style.right = `${PIPELINE_EDGE_INSET}px`;
+      bar.style.width = "auto";
+    } else if (continuesStart) {
+      bar.style.left = `${PIPELINE_EDGE_INSET}px`;
+      bar.style.width = `calc(${left + width}% - ${PIPELINE_EDGE_INSET}px)`;
+    } else {
+      bar.style.left = `${left}%`;
+      bar.style.width = `${width}%`;
+    }
 
     const text = document.createElement("span");
     text.className = "pipeline-bar-text";
@@ -2032,6 +2052,19 @@ function renderPipeline() {
     bar.addEventListener("click", () => openModal({ deal }));
     pipelineRowsEl.appendChild(bar);
   }
+
+  requestAnimationFrame(() => fitPipelineBarLabels());
+}
+
+function fitPipelineBarLabels() {
+  pipelineRowsEl.querySelectorAll(".pipeline-bar").forEach((bar) => {
+    const duration = bar.querySelector(".pipeline-bar-duration");
+    if (!duration) return;
+    duration.hidden = false;
+    // Keep duration only when the bubble is wide enough to show it with padding.
+    const minForDuration = duration.scrollWidth + 36;
+    if (bar.clientWidth < minForDuration) duration.hidden = true;
+  });
 }
 
 function shiftPipelinePeriod(direction) {

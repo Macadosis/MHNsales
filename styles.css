@@ -1296,12 +1296,13 @@ body.is-card-dragging .card {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   overflow: visible;
+  --pipeline-edge-inset: 16px;
 }
 
 .pipeline-row-divider {
   position: absolute;
-  left: 16px;
-  right: 16px;
+  left: var(--pipeline-edge-inset);
+  right: var(--pipeline-edge-inset);
   height: 0;
   border-top: 1px solid var(--line);
   opacity: 0.55;
@@ -1336,26 +1337,52 @@ body.is-card-dragging .card {
   z-index: 1;
 }
 
+.pipeline-bar.continues-start {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+}
+
+.pipeline-bar.continues-end {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+
 .pipeline-bar:hover {
   box-shadow: var(--shadow-lift);
   transform: translateY(-1px);
   z-index: 3;
 }
 
+.pipeline-bar.continues-start:hover,
+.pipeline-bar.continues-end:hover {
+  /* Keep the flat cut flush with the calendar edge while hovering. */
+  transform: translateY(-1px);
+}
+
 .pipeline-bar-text {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   box-sizing: border-box;
   height: 100%;
-  width: 100%;
   padding: 0 14px;
-  line-height: 36px;
   white-space: nowrap;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
+  pointer-events: none;
 }
 
 .pipeline-bar-label {
-  display: inline;
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1379,7 +1406,7 @@ body.is-card-dragging .card {
   font-weight: 600;
   color: var(--pipeline-green-dark);
   white-space: nowrap;
-  margin-left: 8px;
+  flex: 0 0 auto;
 }
 
 .pipeline-empty {
