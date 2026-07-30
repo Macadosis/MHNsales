@@ -1752,7 +1752,116 @@ function formatMonthYear(date) {
   return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
+function resolvePipelineTodayOverlaps(today, monthTicks) {
+  const todayTick = pipelineAxisEl.querySelector(".pipeline-tick-today");
+  const todayLabel = todayTick?.querySelector(".pipeline-tick-label");
+  if (!todayLabel) return;
+
+  const pad = 8;
+  const todayRect = todayLabel.getBoundingClientRect();
+  const todayLeft = todayRect.left - pad;
+  const todayRight = todayRect.right + pad;
+  const todayMid = (todayRect.left + todayRect.right) / 2;
+
+  for (const { tick, monthStart, monthEnd } of monthTicks) {
+    const label = tick.querySelector(".pipeline-tick-label");
+    const revenue = tick.querySelector(".pipeline-tick-revenue");
+    const inThisMonth = today >= monthStart.getTime() && today < monthEnd.getTime();
+    const rel = inThisMonth
+      ? (today - monthStart.getTime()) / (monthEnd.getTime() - monthStart.getTime())
+      : null;
+
+    for (const el of [label, revenue]) {
+      if (!el) continue;
+      el.style.transform = "";
+      el.classList.remove("is-shifted-left", "is-shifted-right");
+    }
+
+    // Prefer a layout rule when today sits inside this month column.
+    if (inThisMonth && rel != null) {
+      if (rel < 0.42 && label) {
+        // Today near the start — keep month name to the right of TODAY.
+        const labelRect = label.getBoundingClientRect();
+        const shift = Math.max(0, todayRight - labelRect.left);
+        if (shift > 0) {
+          label.style.transform = `translateX(${shift}px)`;
+          label.classList.add("is-shifted-right");
+        }
+      } else if (rel > 0.58 && revenue) {
+        // Today near the end — keep revenue to the left of TODAY.
+        const revenueRect = revenue.getBoundingClientRect();
+        const shift = Math.max(0, revenueRect.right - todayLeft);
+        if (shift > 0) {
+          revenue.style.transform = `translateX(-${shift}px)`;
+          revenue.classList.add("is-shifted-left");
+        }
+      } else {
+        // Today mid-month — push whichever gray text collides away from TODAY.
+        pushPipelineAxisTextClear(label, todayLeft, todayRight, todayMid);
+        pushPipelineAxisTextClear(revenue, todayLeft, todayRight, todayMid);
+      }
+      continue;
+    }
+
+    // Adjacent months: clear any leftover collision (e.g. prior month revenue).
+    pushPipelineAxisTextClear(label, todayLeft, todayRight, todayMid);
+    pushPipelineAxisTextClear(revenue, todayLeft, todayRight, todayMid);
+  }
+}
+
+function pushPipelineAxisTextClear(el, todayLeft, todayRight, todayMid) {
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const overlaps = r.left < todayRight && r.right > todayLeft;
+  if (!overlaps) return;
+
+  const elMid = (r.left + r.right) / 2;
+  if (elMid <= todayMid) {
+    const shift = Math.max(0, r.right - todayLeft);
+    if (shift > 0) {
+      el.style.transform = `translateX(-${shift}px)`;
+      el.classList.add("is-shifted-left");
+    }
+  } else {
+    const shift = Math.max(0, todayRight - r.left);
+    if (shift > 0) {
+      el.style.transform = `translateX(${shift}px)`;
+      el.classList.add("is-shifted-right");
+    }
+  }
+}
+
+function hidePipelineTooltip() {
+  const tip = document.getElementById("pipelineTooltip");
+  if (tip) tip.hidden = true;
+}
+
+function showPipelineTooltip(bar, text) {
+  let tip = document.getElementById("pipelineTooltip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = "pipelineTooltip";
+    tip.className = "pipeline-tooltip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+  }
+
+  tip.textContent = text;
+  tip.hidden = false;
+
+  const rect = bar.getBoundingClientRect();
+  const tipWidth = tip.offsetWidth || 240;
+  const tipHeight = tip.offsetHeight || 36;
+  let left = rect.left + rect.width / 2 - tipWidth / 2;
+  let top = rect.top - tipHeight - 10;
+  left = Math.max(8, Math.min(left, window.innerWidth - tipWidth - 8));
+  if (top < 8) top = rect.bottom + 10;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
 function renderPipeline() {
+  hidePipelineTooltip();
   const { start: periodStart, end: periodEnd, span } = getPipelinePeriodRange();
   const periodEndDate = getPipelinePeriodEnd();
   const deals = getPipelineDeals();
@@ -1761,6 +1870,7 @@ function renderPipeline() {
   pipelinePeriodLength.value = String(pipelineState.periodMonths);
 
   pipelineAxisEl.innerHTML = "";
+  const monthTicks = [];
   for (let i = 0; i < pipelineState.periodMonths; i += 1) {
     const monthStart = addMonths(pipelineState.periodStart, i);
     const monthEnd = addMonths(monthStart, 1);
@@ -1784,6 +1894,7 @@ function renderPipeline() {
 
     tick.append(label, revenueEl);
     pipelineAxisEl.appendChild(tick);
+    monthTicks.push({ tick, monthStart, monthEnd, left, width });
   }
 
   const today = startOfDay(new Date()).getTime();
@@ -1793,6 +1904,7 @@ function renderPipeline() {
     todayTick.style.left = `${((today - periodStart) / span) * 100}%`;
     todayTick.innerHTML = `<span class="pipeline-tick-label">Today</span>`;
     pipelineAxisEl.appendChild(todayTick);
+    requestAnimationFrame(() => resolvePipelineTodayOverlaps(today, monthTicks));
   }
 
   pipelineRowsEl.innerHTML = "";
@@ -1847,7 +1959,7 @@ function renderPipeline() {
     bar.style.left = `${left}%`;
     bar.style.width = `${width}%`;
     bar.style.top = `${deal._pipelineRow * PIPELINE_ROW_HEIGHT + PIPELINE_BAR_TOP}px`;
-    bar.title = [
+    const tipText = [
       deal.company,
       deal.tool,
       `${deal.implementationDays} days`,
@@ -1878,6 +1990,11 @@ function renderPipeline() {
 
     text.append(label, duration);
     bar.append(text);
+    bar.addEventListener("mouseenter", () => showPipelineTooltip(bar, tipText));
+    bar.addEventListener("mousemove", () => showPipelineTooltip(bar, tipText));
+    bar.addEventListener("mouseleave", hidePipelineTooltip);
+    bar.addEventListener("focus", () => showPipelineTooltip(bar, tipText));
+    bar.addEventListener("blur", hidePipelineTooltip);
     bar.addEventListener("click", () => openModal({ deal }));
     pipelineRowsEl.appendChild(bar);
   }
@@ -4818,6 +4935,7 @@ document.addEventListener("keydown", (e) => {
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     hideTasksPipelineTooltip();
+    hidePipelineTooltip();
     closeAllSearchSuggestions();
     activeTab = tab.dataset.tab;
     document.querySelectorAll(".tab").forEach((t) => {

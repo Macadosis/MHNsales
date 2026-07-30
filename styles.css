@@ -1197,11 +1197,33 @@ body.is-card-dragging .card {
 .pipeline-tick-today {
   border-left-style: dashed;
   border-left-color: var(--pipeline-green);
-  z-index: 2;
+  z-index: 3;
+  width: 0;
+  padding: 0;
+  overflow: visible;
+  pointer-events: none;
+  justify-content: flex-start;
 }
 
 .pipeline-tick-today .pipeline-tick-label {
   color: var(--pipeline-green-dark);
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.pipeline-tick-label,
+.pipeline-tick-revenue {
+  transition: transform 0.15s ease;
+  z-index: 1;
+}
+
+.pipeline-tick-label.is-shifted-left,
+.pipeline-tick-label.is-shifted-right,
+.pipeline-tick-revenue.is-shifted-left,
+.pipeline-tick-revenue.is-shifted-right {
+  z-index: 2;
 }
 
 .pipeline-today-line {
@@ -1211,6 +1233,27 @@ body.is-card-dragging .card {
   border-left: 1px dashed var(--pipeline-green);
   pointer-events: none;
   z-index: 2;
+}
+
+.pipeline-tooltip {
+  position: fixed;
+  z-index: 80;
+  max-width: min(420px, calc(100vw - 16px));
+  padding: 8px 12px;
+  background: #efeee8;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lift);
+  pointer-events: none;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.pipeline-tooltip[hidden] {
+  display: none;
 }
 
 .pipeline-body {
