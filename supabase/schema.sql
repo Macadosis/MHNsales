@@ -20,6 +20,7 @@ create table if not exists public.deals (
   implementation_days integer,
   committed_at timestamptz,
   dismissed_at timestamptz,
+  paused_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   notes jsonb not null default '[]'::jsonb
@@ -28,6 +29,9 @@ create table if not exists public.deals (
 -- Columns added after the original launch
 alter table public.deals
   add column if not exists board_order double precision;
+
+alter table public.deals
+  add column if not exists paused_at timestamptz;
 
 alter table public.deals
   add column if not exists tasks jsonb not null default '[]'::jsonb;

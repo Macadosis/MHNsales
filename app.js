@@ -88,6 +88,14 @@ const historyListEl = document.getElementById("historyList");
 const historySearchInput = document.getElementById("historySearchInput");
 let historySearchQuery = "";
 
+const pauseOverlay = document.getElementById("pauseOverlay");
+const pauseTitle = document.getElementById("pauseTitle");
+const pauseLead = document.getElementById("pauseLead");
+const pauseConfirmBtn = document.getElementById("pauseConfirmBtn");
+let pendingPauseDealId = null;
+let pauseConfirmAction = "pause"; // "pause" | "unpause"
+let showPausedProspectsOnly = false;
+
 const commitOverlay = document.getElementById("commitOverlay");
 const commitForm = document.getElementById("commitForm");
 const commitDealName = document.getElementById("commitDealName");
@@ -711,9 +719,22 @@ function getStageDeals(stage, { excludeId } = {}) {
     .sort(compareBoardOrder);
 }
 
+/** Paused deals always live under Prospects. */
+function ensurePausedDealsInProspects() {
+  const changedIds = [];
+  for (const deal of deals) {
+    if (!isDealPaused(deal) || deal.stage === "dismissed" || deal.dismissedAt) continue;
+    if (deal.stage !== "prospects") {
+      deal.stage = "prospects";
+      changedIds.push(deal.id);
+    }
+  }
+  return changedIds;
+}
+
 /** Assign missing boardOrder values so column order is stable and rearrangeable. */
 function ensureBoardOrders() {
-  const changedIds = [];
+  const changedIds = ensurePausedDealsInProspects();
   const byStage = new Map();
 
   for (const deal of deals) {
@@ -854,6 +875,19 @@ function getActiveDeals() {
   return deals.filter((deal) => deal.stage !== "dismissed");
 }
 
+function isDealPaused(deal) {
+  return Boolean(deal?.pausedAt);
+}
+
+function nextCardSiblingId(el) {
+  let sib = el?.nextElementSibling;
+  while (sib) {
+    if (sib.classList?.contains("card") && sib.dataset?.id) return sib.dataset.id;
+    sib = sib.nextElementSibling;
+  }
+  return null;
+}
+
 function getDismissedDeals() {
   return deals
     .filter((deal) => deal.stage === "dismissed")
@@ -869,7 +903,11 @@ function getFilteredDismissedDeals() {
   );
 }
 
-function getFieldMatches(fieldKey, query, { trackDismissed = false, activeOnly = false } = {}) {
+function getFieldMatches(
+  fieldKey,
+  query,
+  { trackDismissed = false, trackPaused = false, activeOnly = false } = {}
+) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
 
@@ -881,21 +919,51 @@ function getFieldMatches(fieldKey, query, { trackDismissed = false, activeOnly =
     const key = value.toLowerCase();
     let entry = byValue.get(key);
     if (!entry) {
-      entry = { name: value, hasActive: false, hasDismissed: false };
+      entry = {
+        name: value,
+        hasActive: false,
+        hasDismissed: false,
+        hasPaused: false,
+        hasUnpaused: false,
+      };
       byValue.set(key, entry);
     }
-    if (deal.stage === "dismissed") entry.hasDismissed = true;
-    else entry.hasActive = true;
+    if (deal.stage === "dismissed") {
+      entry.hasDismissed = true;
+    } else {
+      entry.hasActive = true;
+      if (isDealPaused(deal)) entry.hasPaused = true;
+      else entry.hasUnpaused = true;
+    }
   }
 
   return [...byValue.values()]
     .filter(({ name }) => name.toLowerCase().includes(q))
-    .map(({ name, hasActive, hasDismissed }) => ({
+    .map(({ name, hasActive, hasDismissed, hasPaused, hasUnpaused }) => ({
       name,
       dismissed: trackDismissed && hasDismissed && !hasActive,
+      paused: trackPaused && hasPaused && !hasUnpaused,
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 8);
+}
+
+function appendSuggestionStatusBadge(item, { dismissed = false, paused = false } = {}) {
+  if (dismissed) {
+    const badge = document.createElement("span");
+    badge.className = "combobox-suggestion-dismissed";
+    badge.textContent = "(Dismissed)";
+    item.appendChild(document.createTextNode(" "));
+    item.appendChild(badge);
+    return;
+  }
+  if (paused) {
+    const badge = document.createElement("span");
+    badge.className = "combobox-suggestion-paused";
+    badge.textContent = "(Paused)";
+    item.appendChild(document.createTextNode(" "));
+    item.appendChild(badge);
+  }
 }
 
 function highlightSuggestionMatch(name, query) {
@@ -953,6 +1021,7 @@ function renderFieldSuggestions(fieldKey) {
   const query = state.input.value;
   const matches = getFieldMatches(fieldKey, query, {
     trackDismissed: state.trackDismissed,
+    trackPaused: state.trackPaused,
   });
   state.listEl.innerHTML = "";
   state.activeIndex = -1;
@@ -962,7 +1031,7 @@ function renderFieldSuggestions(fieldKey) {
     return;
   }
 
-  for (const { name, dismissed } of matches) {
+  for (const { name, dismissed, paused } of matches) {
     const item = document.createElement("li");
     item.className = "combobox-suggestion";
     item.role = "option";
@@ -972,14 +1041,7 @@ function renderFieldSuggestions(fieldKey) {
     label.className = "combobox-suggestion-name";
     label.appendChild(highlightSuggestionMatch(name, query));
     item.appendChild(label);
-
-    if (dismissed) {
-      const badge = document.createElement("span");
-      badge.className = "combobox-suggestion-dismissed";
-      badge.textContent = "(Dismissed)";
-      item.appendChild(document.createTextNode(" "));
-      item.appendChild(badge);
-    }
+    appendSuggestionStatusBadge(item, { dismissed, paused });
 
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -992,7 +1054,7 @@ function renderFieldSuggestions(fieldKey) {
   state.input.setAttribute("aria-expanded", "true");
 }
 
-function setupFieldSuggestions(fieldKey, { trackDismissed = false } = {}) {
+function setupFieldSuggestions(fieldKey, { trackDismissed = false, trackPaused = false } = {}) {
   const input = form.elements[fieldKey];
   const listEl = document.getElementById(`${fieldKey}Suggestions`);
   if (!input || !listEl) return;
@@ -1002,6 +1064,7 @@ function setupFieldSuggestions(fieldKey, { trackDismissed = false } = {}) {
     listEl,
     activeIndex: -1,
     trackDismissed,
+    trackPaused,
   });
 
   input.addEventListener("input", () => renderFieldSuggestions(fieldKey));
@@ -1032,7 +1095,7 @@ function setupFieldSuggestions(fieldKey, { trackDismissed = false } = {}) {
   });
 }
 
-setupFieldSuggestions("company", { trackDismissed: true });
+setupFieldSuggestions("company", { trackDismissed: true, trackPaused: true });
 setupFieldSuggestions("industry");
 setupFieldSuggestions("tool");
 setupFieldSuggestions("owner");
@@ -1298,7 +1361,10 @@ function renderSearchSuggestions(source) {
   if (!state) return;
 
   const query = state.input.value;
-  const matches = getFieldMatches("company", query, { activeOnly: true });
+  const matches = getFieldMatches("company", query, {
+    activeOnly: true,
+    trackPaused: true,
+  });
   state.listEl.innerHTML = "";
   state.activeIndex = -1;
 
@@ -1307,7 +1373,7 @@ function renderSearchSuggestions(source) {
     return;
   }
 
-  for (const { name } of matches) {
+  for (const { name, paused } of matches) {
     const item = document.createElement("li");
     item.className = "combobox-suggestion";
     item.role = "option";
@@ -1317,6 +1383,7 @@ function renderSearchSuggestions(source) {
     label.className = "combobox-suggestion-name";
     label.appendChild(highlightSuggestionMatch(name, query));
     item.appendChild(label);
+    appendSuggestionStatusBadge(item, { paused });
 
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -1601,14 +1668,90 @@ function restoreDealToProspects(dealId) {
   if (!deal || deal.stage !== "dismissed") return;
   deal.stage = "prospects";
   delete deal.dismissedAt;
+  delete deal.pausedAt;
   deal.boardOrder = nextBoardOrder("prospects");
   saveDeals(deal.id);
+  render();
+}
+
+function openPauseConfirm(deal) {
+  if (!deal?.id) return;
+  pendingPauseDealId = deal.id;
+  pauseConfirmAction = isDealPaused(deal) ? "unpause" : "pause";
+  syncPauseConfirmUi(deal);
+  pauseOverlay.hidden = false;
+}
+
+function syncPauseConfirmUi(deal) {
+  const name = deal?.company ? ` “${deal.company}”` : "";
+  const pausing = pauseConfirmAction === "pause";
+  pauseTitle.textContent = pausing ? "Pause deal" : "Unpause deal";
+  pauseLead.textContent = pausing
+    ? `Are you sure you want to pause this deal${name}? It will stay in Prospects until you unpause it.`
+    : `Are you sure you want to unpause this deal${name}? It will return to the active Prospects list.`;
+  pauseConfirmBtn.textContent = pausing ? "Yes, pause" : "Yes, unpause";
+}
+
+function closePauseModal() {
+  pauseOverlay.hidden = true;
+  pendingPauseDealId = null;
+  pauseConfirmAction = "pause";
+}
+
+function confirmPauseAction() {
+  if (!pendingPauseDealId) return;
+  const deal = deals.find((d) => d.id === pendingPauseDealId);
+  if (!deal) {
+    closePauseModal();
+    return;
+  }
+
+  if (pauseConfirmAction === "pause") {
+    pauseDeal(deal);
+  } else {
+    unpauseDeal(deal);
+  }
+  closePauseModal();
+}
+
+function pauseDeal(deal) {
+  if (!deal || deal.stage === "dismissed") return;
+  deal.pausedAt = Date.now();
+  if (deal.stage !== "prospects") {
+    deal.boardOrder = nextBoardOrder("prospects");
+    deal.stage = "prospects";
+  }
+  saveDeals(deal.id);
+  render();
+}
+
+function unpauseDeal(deal) {
+  if (!deal || !isDealPaused(deal)) return;
+  delete deal.pausedAt;
+  deal.stage = "prospects";
+  const stillPaused = getActiveDeals().some((d) => isDealPaused(d));
+  if (!stillPaused) showPausedProspectsOnly = false;
+  saveDeals(deal.id);
+  render();
+}
+
+function togglePausedProspectsView() {
+  showPausedProspectsOnly = !showPausedProspectsOnly;
+  render();
+}
+
+function clearPausedProspectsView() {
+  if (!showPausedProspectsOnly) return;
+  showPausedProspectsOnly = false;
   render();
 }
 
 function renderBoard() {
   boardEl.innerHTML = "";
   const visibleDeals = getFilteredDeals();
+  if (!visibleDeals.some((d) => isDealPaused(d))) {
+    showPausedProspectsOnly = false;
+  }
   for (const stage of STAGES) {
     boardEl.appendChild(renderColumn(stage, visibleDeals));
   }
@@ -2073,10 +2216,21 @@ function shiftPipelinePeriod(direction) {
 }
 
 function renderColumn(stage, visibleDeals) {
-  const stageDeals = visibleDeals
-    .filter((d) => d.stage === stage.id)
+  // Paused deals always belong under Prospects, even if stage drifted.
+  const activeDeals = visibleDeals
+    .filter((d) => d.stage === stage.id && !isDealPaused(d))
     .sort(compareBoardOrder);
-  const total = stageDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+  const pausedDeals =
+    stage.id === "prospects"
+      ? visibleDeals.filter((d) => isDealPaused(d)).sort(compareBoardOrder)
+      : [];
+  const pausedView =
+    stage.id === "prospects" && showPausedProspectsOnly && pausedDeals.length > 0;
+  const shownDeals = pausedView ? pausedDeals : activeDeals;
+  const activeTotal = activeDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+  const pausedTotal = pausedDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+  const includingPausedTotal = activeTotal + pausedTotal;
+  const total = pausedView ? pausedTotal : activeTotal;
   const filtersActive = hasActiveFilters();
 
   const col = document.createElement("section");
@@ -2086,17 +2240,54 @@ function renderColumn(stage, visibleDeals) {
   const header = document.createElement("div");
   header.className = "column-header";
 
+  const titleGroup = document.createElement("div");
+  titleGroup.className = "column-heading";
+
   const title = document.createElement("h2");
   title.className = "column-title";
   title.textContent = stage.label;
+  if (stage.id === "prospects" && pausedView) {
+    title.classList.add("is-muted");
+    title.title = "Show active prospects";
+    title.style.cursor = "pointer";
+    title.addEventListener("click", clearPausedProspectsView);
+  }
 
   const count = document.createElement("span");
   count.className = "column-count";
-  count.textContent = stageDeals.length;
+  count.textContent = activeDeals.length;
+  if (stage.id === "prospects" && pausedView) {
+    count.classList.add("is-muted");
+    count.title = "Show active prospects";
+    count.style.cursor = "pointer";
+    count.addEventListener("click", clearPausedProspectsView);
+  }
+
+  titleGroup.append(title, count);
+  header.appendChild(titleGroup);
 
   const canCreateInStage = stage.id === "prospects" || stage.id === "interested";
 
-  header.append(title, count);
+  if (stage.id === "prospects" && pausedDeals.length > 0) {
+    const pausedToggle = document.createElement("button");
+    pausedToggle.type = "button";
+    pausedToggle.className = "column-paused-toggle";
+    if (pausedView) pausedToggle.classList.add("is-active");
+    pausedToggle.title = pausedView ? "Show active prospects" : "Show paused deals only";
+    pausedToggle.setAttribute("aria-pressed", pausedView ? "true" : "false");
+
+    const pausedLabel = document.createElement("span");
+    pausedLabel.className = "column-paused-label";
+    pausedLabel.textContent = "Paused";
+
+    const pausedCount = document.createElement("span");
+    pausedCount.className = "column-count column-paused-count";
+    pausedCount.textContent = pausedDeals.length;
+
+    pausedToggle.append(pausedLabel, pausedCount);
+    pausedToggle.addEventListener("click", togglePausedProspectsView);
+    header.appendChild(pausedToggle);
+  }
 
   if (canCreateInStage) {
     const addBtn = document.createElement("button");
@@ -2110,20 +2301,44 @@ function renderColumn(stage, visibleDeals) {
   const body = document.createElement("div");
   body.className = "column-body";
 
-  if (stageDeals.length === 0) {
+  if (shownDeals.length === 0) {
     const hint = document.createElement("div");
     hint.className = "empty-hint";
-    hint.textContent = (filtersActive || searchQuery) ? "No matching deals" : "Drop deals here";
+    if (pausedView) {
+      hint.textContent = "No paused deals";
+    } else {
+      hint.textContent = (filtersActive || searchQuery) ? "No matching deals" : "Drop deals here";
+    }
     body.appendChild(hint);
   } else {
-    for (const deal of stageDeals) {
+    for (const deal of shownDeals) {
       body.appendChild(renderCard(deal));
     }
   }
 
   const footer = document.createElement("div");
   footer.className = "column-footer";
-  footer.innerHTML = `<span class="total-label">Total</span><span class="total-value">${fmtEuro.format(total)}</span>`;
+
+  const totalLabel = document.createElement("span");
+  totalLabel.className = "total-label";
+  totalLabel.textContent = "Total";
+
+  const totalRight = document.createElement("div");
+  totalRight.className = "total-right";
+
+  if (stage.id === "prospects" && pausedDeals.length > 0 && !pausedView) {
+    const including = document.createElement("span");
+    including.className = "total-including-paused";
+    including.textContent = `(including paused ${fmtEuro.format(includingPausedTotal)})`;
+    totalRight.appendChild(including);
+  }
+
+  const totalValue = document.createElement("span");
+  totalValue.className = "total-value";
+  totalValue.textContent = fmtEuro.format(total);
+  totalRight.appendChild(totalValue);
+
+  footer.append(totalLabel, totalRight);
 
   col.append(header, body, footer);
   return col;
@@ -2133,6 +2348,29 @@ function renderCard(deal) {
   const card = document.createElement("article");
   card.className = "card";
   card.dataset.id = deal.id;
+  if (isDealPaused(deal)) card.classList.add("is-paused");
+
+  const pauseBtn = document.createElement("button");
+  pauseBtn.type = "button";
+  pauseBtn.className = "card-pause-btn";
+  pauseBtn.setAttribute("aria-label", isDealPaused(deal) ? "Unpause deal" : "Pause deal");
+  pauseBtn.innerHTML = isDealPaused(deal)
+    ? `<svg class="card-pause-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><polygon points="10,8 17,12 10,16" fill="currentColor"/></svg>`
+    : `<svg class="card-pause-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="8.5" y="8" width="2.2" height="8" rx="0.6" fill="currentColor"/><rect x="13.3" y="8" width="2.2" height="8" rx="0.6" fill="currentColor"/></svg>`;
+
+  const tip = document.createElement("span");
+  tip.className = "card-pause-tip";
+  tip.textContent = isDealPaused(deal) ? "Unpause deal" : "Pause deal";
+  pauseBtn.appendChild(tip);
+
+  pauseBtn.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+  });
+  pauseBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openPauseConfirm(deal);
+  });
 
   const company = document.createElement("h3");
   company.className = "card-company";
@@ -2161,7 +2399,7 @@ function renderCard(deal) {
     tag.textContent = deal.industry;
     tags.appendChild(tag);
   }
-  if (deal.implementationDays && deal.committedAt) {
+  if (deal.implementationDays && deal.committedAt && !isDealPaused(deal)) {
     const impl = document.createElement("span");
     impl.className = "tag tag-impl";
     impl.textContent = `${formatShortDate(deal.committedAt)} · ${deal.implementationDays} days`;
@@ -2184,7 +2422,7 @@ function renderCard(deal) {
     row.appendChild(owner);
   }
 
-  card.append(company);
+  card.append(pauseBtn, company);
   if (meta.textContent) card.append(meta);
   if (tags.childElementCount) card.append(tags);
   card.append(row);
@@ -2196,6 +2434,7 @@ function renderCard(deal) {
       delete card.dataset.suppressClick;
       return;
     }
+    if (e.target.closest(".card-pause-btn")) return;
     openModal({ deal });
   });
 
@@ -2531,7 +2770,7 @@ function getDropTargetAt(clientX, clientY) {
     const before = clientY < rect.top + rect.height / 2;
     return {
       stage,
-      insertBeforeId: before ? card.dataset.id : (card.nextElementSibling?.dataset?.id || null),
+      insertBeforeId: before ? card.dataset.id : nextCardSiblingId(card),
       indicatorCard: card,
       before,
     };
@@ -2638,6 +2877,10 @@ function commitDragDrop(clientX, clientY) {
   if (deal.stage === target.stage && target.insertBeforeId === nextId) return;
 
   reorderDeal(deal, target.stage, target.insertBeforeId);
+  // Paused deals live in Prospects; leaving that column clears the pause.
+  if (isDealPaused(deal) && deal.stage !== "prospects") {
+    delete deal.pausedAt;
+  }
   saveDeals(getStageDeals(target.stage).map((d) => d.id));
   render();
 }
@@ -2646,6 +2889,7 @@ function attachCardPointerDrag(card, deal) {
   card.addEventListener("pointerdown", (e) => {
     if (e.button != null && e.button !== 0) return;
     if (e.isPrimary === false) return;
+    if (e.target.closest(".card-pause-btn")) return;
     if (dragState) cleanupDrag();
 
     dragState = {
@@ -2746,6 +2990,7 @@ commitForm.addEventListener("submit", (e) => {
 
   pendingCommitDeal.committedAt = startDate;
   pendingCommitDeal.implementationDays = days;
+  delete pendingCommitDeal.pausedAt;
   reorderDeal(pendingCommitDeal, "committed", null);
   saveDeals(getStageDeals("committed").map((d) => d.id));
   render();
@@ -3913,6 +4158,7 @@ function dismissDeal() {
   if (!deal) return;
   deal.stage = "dismissed";
   deal.dismissedAt = Date.now();
+  delete deal.pausedAt;
   saveDeals(deal.id);
   render();
   closeDismissModal();
@@ -4090,12 +4336,20 @@ dismissOverlay.addEventListener("click", (e) => {
   if (e.target === dismissOverlay) closeDismissModal();
 });
 
+pauseConfirmBtn.addEventListener("click", confirmPauseAction);
+document.getElementById("pauseCancelBtn").addEventListener("click", closePauseModal);
+document.getElementById("pauseCloseBtn").addEventListener("click", closePauseModal);
+pauseOverlay.addEventListener("click", (e) => {
+  if (e.target === pauseOverlay) closePauseModal();
+});
+
 document.getElementById("newDealBtn").addEventListener("click", () => openModal());
 document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
 document.getElementById("cancelBtn").addEventListener("click", closeModal);
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!dismissOverlay.hidden) closeDismissModal();
+  if (!pauseOverlay.hidden) closePauseModal();
+  else if (!dismissOverlay.hidden) closeDismissModal();
   else if (!commitOverlay.hidden) closeCommitModal();
   else if (!overlay.hidden) closeModal();
   else if (!importOverlay.hidden) closeImportModal();

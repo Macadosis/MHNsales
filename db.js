@@ -193,6 +193,7 @@ function dealToRow(deal, { nextVersion } = {}) {
     board_order: deal.boardOrder ?? null,
     committed_at: msToIso(deal.committedAt),
     dismissed_at: msToIso(deal.dismissedAt),
+    paused_at: msToIso(deal.pausedAt),
     created_at: msToIso(deal.createdAt) || new Date().toISOString(),
     updated_at: new Date().toISOString(),
     notes: Array.isArray(deal.notes) ? deal.notes : [],
@@ -220,6 +221,7 @@ function rowToDeal(row) {
     boardOrder: row.board_order ?? undefined,
     committedAt: isoToMs(row.committed_at) ?? undefined,
     dismissedAt: isoToMs(row.dismissed_at) ?? undefined,
+    pausedAt: isoToMs(row.paused_at) ?? undefined,
     createdAt: isoToMs(row.created_at) || Date.now(),
     notes: Array.isArray(row.notes) ? row.notes : [],
     tasks: Array.isArray(row.tasks) ? row.tasks : [],
@@ -298,6 +300,10 @@ async function withColumnCompat(run) {
     }
     if (/tasks/i.test(msg) && !omit.has("tasks")) {
       omit.add("tasks");
+      continue;
+    }
+    if (/paused_at/i.test(msg) && !omit.has("paused_at")) {
+      omit.add("paused_at");
       continue;
     }
     return result;

@@ -787,9 +787,16 @@ main {
 
 .column-header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   padding: 14px 16px 10px;
+}
+
+.column-heading,
+.column-paused-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .column-title {
@@ -797,21 +804,67 @@ main {
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  line-height: 1;
   margin: 0;
+}
+
+.column-title.is-muted,
+.column-count.is-muted {
+  opacity: 0.55;
 }
 
 .column-count {
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
   color: var(--ink-faint);
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 1px 8px;
+  padding: 2px 8px;
+}
+
+.column-paused-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0 0 0 2px;
+  cursor: pointer;
+  color: inherit;
+  border-radius: 999px;
+}
+
+.column-paused-toggle:hover .column-paused-label {
+  color: var(--ink-soft);
+}
+
+.column-paused-toggle.is-active .column-paused-label {
+  color: var(--ink);
+}
+
+.column-paused-toggle.is-active .column-paused-count {
+  color: var(--ink);
+  border-color: #cfccbf;
+  background: var(--surface);
+}
+
+.column-paused-label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink-faint);
+  letter-spacing: 0.01em;
+}
+
+.column-paused-count {
+  font-weight: 500;
 }
 
 .column-add {
   margin-left: auto;
+  align-self: center;
   appearance: none;
   border: none;
   background: transparent;
@@ -860,6 +913,7 @@ main {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: 10px;
 }
 
 .column-footer .total-label {
@@ -870,15 +924,36 @@ main {
   color: var(--ink-faint);
 }
 
+.column-footer .total-right {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.column-footer .total-including-paused {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--ink-faint);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
 .column-footer .total-value {
   font-family: var(--font-serif);
   font-size: 17px;
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 /* ------------------------------ Cards -------------------------- */
 
 .card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -891,6 +966,81 @@ main {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+.card.is-paused {
+  opacity: 0.72;
+  background: #fbfaf7;
+}
+
+.card-pause-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.card-pause-btn:hover {
+  color: var(--ink);
+  background: var(--bg-sunken);
+}
+
+.card.is-paused .card-pause-btn {
+  color: var(--ink-soft);
+}
+
+.card-pause-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.card-pause-tip {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--ink);
+  border-radius: 6px;
+  padding: 5px 8px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  box-shadow: 0 4px 12px rgba(20, 20, 19, 0.18);
+}
+
+.card-pause-tip::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: 10px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 4px solid var(--ink);
+}
+
+.card-pause-btn:hover .card-pause-tip,
+.card-pause-btn:focus-visible .card-pause-tip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* Only when the column actually overflows do cards allow vertical scrolling */
@@ -973,7 +1123,7 @@ body.is-card-dragging .card {
   align-items: baseline;
   flex-wrap: wrap;
   gap: 6px 8px;
-  margin: 0 0 2px;
+  margin: 0 28px 2px 0;
 }
 
 .card-company-name {
@@ -3104,7 +3254,8 @@ body.is-card-dragging .card {
   color: var(--ink);
 }
 
-.combobox-suggestion-dismissed {
+.combobox-suggestion-dismissed,
+.combobox-suggestion-paused {
   color: var(--accent);
   font-weight: 500;
 }

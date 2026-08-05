@@ -642,6 +642,25 @@
     </div>
   </div>
 
+  <!-- Pause / unpause deal confirmation -->
+  <div class="modal-overlay" id="pauseOverlay" hidden>
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+      <div class="modal-header">
+        <h2 id="pauseTitle">Pause deal</h2>
+        <button class="icon-btn" id="pauseCloseBtn" aria-label="Close">&times;</button>
+      </div>
+      <p class="modal-lead" id="pauseLead">
+        Are you sure you want to pause this deal?
+      </p>
+      <div class="modal-actions">
+        <div class="modal-actions-right">
+          <button type="button" class="btn btn-ghost" id="pauseCancelBtn">No, go back</button>
+          <button type="button" class="btn btn-primary" id="pauseConfirmBtn">Yes, pause</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Commit deal: implementation timeframe -->
   <div class="modal-overlay" id="commitOverlay" hidden>
     <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="commitTitle">
