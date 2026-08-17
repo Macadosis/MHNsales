@@ -65,55 +65,10 @@ async function getCurrentAuthUser() {
   return sessionToUser(session);
 }
 
-async function signUp({ name, email, password }) {
-  const client = getAuthClient();
-  if (!client) {
-    return { ok: false, error: "Supabase is not configured. Add credentials in config.js." };
-  }
-
-  const trimmedName = String(name || "").trim();
-  const trimmedEmail = String(email || "").trim().toLowerCase();
-  if (!trimmedName) return { ok: false, error: "Please enter your name." };
-  if (!trimmedEmail) return { ok: false, error: "Please enter your email." };
-  if (!password || password.length < 6) {
-    return { ok: false, error: "Password must be at least 6 characters." };
-  }
-
-  const { data, error } = await client.auth.signUp({
-    email: trimmedEmail,
-    password,
-    options: {
-      data: {
-        full_name: trimmedName,
-        name: trimmedName,
-      },
-    },
-  });
-
-  if (error) return { ok: false, error: friendlyAuthError(error) };
-
-  // Supabase returns a user without a session when email confirmation is required.
-  if (data.user && !data.session) {
-    return {
-      ok: true,
-      needsEmailConfirmation: true,
-      user: {
-        id: data.user.id,
-        email: data.user.email || trimmedEmail,
-        name: trimmedName,
-      },
-    };
-  }
-
+async function signUp() {
   return {
-    ok: true,
-    needsEmailConfirmation: false,
-    session: data.session,
-    user: sessionToUser(data.session) || {
-      id: data.user?.id,
-      email: trimmedEmail,
-      name: trimmedName,
-    },
+    ok: false,
+    error: "Accounts are created by an administrator. Self-signup is disabled.",
   };
 }
 

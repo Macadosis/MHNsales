@@ -3,8 +3,8 @@
  * Fill these from: Supabase → Project Settings → API
  * Then rename this file to config.js (or edit config.js directly).
  *
- * Also enable Auth → Providers → Email, and for a small team
- * turn off "Confirm email" so Create account can sign in immediately.
+ * Enable Auth → Providers → Email. Disable "Allow new users to sign up".
+ * Create teammate accounts in Authentication → Users (admin-provisioned).
  */
 window.MHN_CONFIG = {
   supabaseUrl: "https://YOUR_PROJECT_REF.supabase.co",

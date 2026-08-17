@@ -163,15 +163,12 @@ const loginAuthError = document.getElementById("loginAuthError");
 const signupAuthError = document.getElementById("signupAuthError");
 const signupAuthSuccess = document.getElementById("signupAuthSuccess");
 const loginSubmitBtn = document.getElementById("loginSubmitBtn");
-const signupSubmitBtn = document.getElementById("signupSubmitBtn");
-const authModeLoginBtn = document.getElementById("authModeLogin");
-const authModeSignupBtn = document.getElementById("authModeSignup");
 const appShell = document.getElementById("appShell");
 const userChip = document.getElementById("userChip");
 const userChipName = document.getElementById("userChipName");
 const logoutBtn = document.getElementById("logoutBtn");
 
-let authMode = "login"; // "login" | "signup"
+let authMode = "login"; // login only — self-signup is disabled
 let authBusy = false;
 
 function getCurrentUserName() {
@@ -190,52 +187,26 @@ function setAuthMessage({ error = "", success = "" } = {}) {
 
 function setAuthBusy(busy) {
   authBusy = busy;
-  const activeBtn = authMode === "signup" ? signupSubmitBtn : loginSubmitBtn;
-  const idleBtn = authMode === "signup" ? loginSubmitBtn : signupSubmitBtn;
-
-  activeBtn.disabled = busy;
-  idleBtn.disabled = true;
-
-  loginSubmitBtn.textContent = busy && authMode === "login" ? "Logging in…" : "Log in";
-  signupSubmitBtn.textContent = busy && authMode === "signup" ? "Creating account…" : "Create account";
+  loginSubmitBtn.disabled = busy;
+  loginSubmitBtn.textContent = busy ? "Logging in…" : "Log in";
 }
 
-function setAuthMode(mode) {
-  authMode = mode === "signup" ? "signup" : "login";
-  const isSignup = authMode === "signup";
+function setAuthMode() {
+  authMode = "login";
 
-  authModeLoginBtn.classList.toggle("is-active", !isSignup);
-  authModeSignupBtn.classList.toggle("is-active", isSignup);
-  authModeLoginBtn.setAttribute("aria-selected", (!isSignup).toString());
-  authModeSignupBtn.setAttribute("aria-selected", isSignup.toString());
+  loginForm.hidden = false;
+  signupForm.hidden = true;
 
-  // Keep forms fully separate in the DOM visibility so password managers
-  // don't see new-password fields while logging in.
-  loginForm.hidden = isSignup;
-  signupForm.hidden = !isSignup;
+  for (const el of loginForm.elements) el.disabled = false;
+  for (const el of signupForm.elements) el.disabled = true;
 
-  // Disable fields in the hidden form so password managers ignore them.
-  for (const el of loginForm.elements) el.disabled = isSignup;
-  for (const el of signupForm.elements) el.disabled = !isSignup;
-
-  loginLead.textContent = isSignup
-    ? "Create an account with your name, email, and password."
-    : "Log in with your email to open the sales board.";
-
-  // Carry email across modes for convenience
-  if (isSignup && loginEmailInput.value && !signupEmailInput.value) {
-    signupEmailInput.value = loginEmailInput.value;
-  }
-  if (!isSignup && signupEmailInput.value && !loginEmailInput.value) {
-    loginEmailInput.value = signupEmailInput.value;
-  }
+  loginLead.textContent = "Log in with the email and password provided for your account.";
 
   setAuthMessage();
   setAuthBusy(false);
 
   requestAnimationFrame(() => {
-    if (isSignup) signupNameInput.focus();
-    else loginEmailInput.focus();
+    loginEmailInput.focus();
   });
 }
 
@@ -342,59 +313,6 @@ async function handleLoginSubmit(e) {
 
 async function handleSignupSubmit(e) {
   e.preventDefault();
-  if (authBusy) return;
-
-  const auth = window.MHN_AUTH;
-  if (!auth?.isConfigured?.()) {
-    setAuthMessage({
-      error: "Supabase is not configured. Add your project URL and anon key in config.js.",
-    });
-    return;
-  }
-
-  const name = signupNameInput.value;
-  const email = signupEmailInput.value;
-  const password = signupPasswordInput.value;
-  const confirm = signupConfirmInput.value;
-
-  setAuthMessage();
-
-  if (password !== confirm) {
-    setAuthMessage({ error: "Passwords do not match." });
-    signupConfirmInput.focus();
-    return;
-  }
-
-  setAuthBusy(true);
-  try {
-    const result = await auth.signUp({ name, email, password });
-
-    if (!result.ok) {
-      setAuthMessage({ error: result.error || "Authentication failed." });
-      return;
-    }
-
-    if (result.needsEmailConfirmation) {
-      loginEmailInput.value = email;
-      loginPasswordInput.value = "";
-      signupPasswordInput.value = "";
-      signupConfirmInput.value = "";
-      setAuthMode("login");
-      loginAuthError.textContent = "Account created. Check your email to confirm, then log in.";
-      loginAuthError.hidden = false;
-      loginAuthError.classList.add("is-info");
-      return;
-    }
-
-    await offerSavePassword(email, password, name);
-    applyAuthUser(result.user);
-    await startApp();
-  } catch (err) {
-    console.error(err);
-    setAuthMessage({ error: "Something went wrong. Please try again." });
-  } finally {
-    setAuthBusy(false);
-  }
 }
 
 async function logout() {
@@ -5415,8 +5333,6 @@ async function startApp() {
   }
 }
 
-authModeLoginBtn.addEventListener("click", () => setAuthMode("login"));
-authModeSignupBtn.addEventListener("click", () => setAuthMode("signup"));
 loginForm.addEventListener("submit", handleLoginSubmit);
 signupForm.addEventListener("submit", handleSignupSubmit);
 logoutBtn.addEventListener("click", () => {

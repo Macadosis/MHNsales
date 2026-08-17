@@ -154,14 +154,7 @@ body {
 }
 
 .auth-mode-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: 20px;
-  background: var(--bg-sunken);
-  border-radius: 999px;
-  border: 1px solid var(--line);
+  display: none;
 }
 
 .auth-mode-tab {

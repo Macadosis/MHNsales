@@ -57,7 +57,7 @@ create policy "Authenticated users full access"
 
 -- Auth setup (Dashboard, not SQL):
 -- 1) Authentication → Providers → Email → Enable
--- 2) For a small team: disable "Confirm email" so signup can sign in immediately
+-- 2) Disable "Allow new users to sign up"; create teammate accounts in Authentication → Users
 -- 3) Authentication → URL Configuration → add your GitHub Pages URL to Redirect URLs
 
 do $$
