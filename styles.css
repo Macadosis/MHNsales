@@ -2941,7 +2941,7 @@ body.is-card-dragging .card {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: 280px;
+  max-height: min(52vh, 440px);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: #d5d2c6 transparent;
@@ -2962,7 +2962,7 @@ body.is-card-dragging .card {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -3001,14 +3001,16 @@ body.is-card-dragging .card {
 }
 
 .activity-note .note-textarea {
-  width: auto;
-  min-width: 12ch;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   min-height: 0;
   height: auto;
-  field-sizing: content;
   resize: none;
   overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   background: transparent;
   border-color: transparent;
   padding: 0;

@@ -967,16 +967,24 @@ function toTitleCase(value) {
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-    .map((word) =>
-      word
-        .split("-")
-        .map((part) => {
-          if (!part) return part;
-          return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
-        })
-        .join("-")
-    )
+    .map((word) => word.split("-").map(titleCasePart).join("-"))
     .join(" ");
+}
+
+function titleCasePart(part) {
+  if (!part) return part;
+  const match = part.match(/^(\W*)(.*?)(\W*)$/);
+  if (!match) return part;
+  const [, lead, core, trail] = match;
+  if (!core) return part;
+
+  const letters = core.replace(/[^\p{L}]/gu, "");
+  const keepAbbreviation =
+    letters.length >= 2 && letters === letters.toUpperCase();
+  const cased = keepAbbreviation
+    ? core
+    : core.charAt(0).toUpperCase() + core.slice(1).toLowerCase();
+  return `${lead}${cased}${trail}`;
 }
 
 function startOfMonth(date) {
@@ -3389,15 +3397,9 @@ function updateDealTaskMeta(task, metaEl) {
 }
 
 function resizeActivityNote(textarea) {
+  textarea.style.width = "100%";
   textarea.style.height = "auto";
-  textarea.style.height = `${textarea.scrollHeight}px`;
-
-  if (document.activeElement === textarea) return;
-
-  const lines = textarea.value.split("\n");
-  const longest = Math.max(...lines.map((line) => line.length), 1);
-  const chars = Math.min(Math.max(longest, 8), 52);
-  textarea.style.width = `${chars}ch`;
+  textarea.style.height = `${Math.max(textarea.scrollHeight, 0)}px`;
 }
 
 function renderActivityNotes() {
