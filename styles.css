@@ -3380,6 +3380,7 @@ body.is-card-dragging .card {
 .combobox-suggestion {
   display: flex;
   align-items: center;
+  gap: 6px;
   height: var(--suggestion-height);
   padding: 0 10px;
   border-radius: var(--radius-sm);

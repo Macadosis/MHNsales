@@ -1186,7 +1186,6 @@ function appendSuggestionStatusBadge(item, { dismissed = false, paused = false }
     const badge = document.createElement("span");
     badge.className = "combobox-suggestion-dismissed";
     badge.textContent = "(Dismissed)";
-    item.appendChild(document.createTextNode(" "));
     item.appendChild(badge);
     return;
   }
@@ -1194,7 +1193,6 @@ function appendSuggestionStatusBadge(item, { dismissed = false, paused = false }
     const badge = document.createElement("span");
     badge.className = "combobox-suggestion-paused";
     badge.textContent = "(Paused)";
-    item.appendChild(document.createTextNode(" "));
     item.appendChild(badge);
   }
 }
