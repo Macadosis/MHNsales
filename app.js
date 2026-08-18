@@ -1108,6 +1108,7 @@ function toggleDealPin(deal) {
   } else {
     deal.pinnedAt = Date.now();
   }
+  closeFilterMenus();
   saveDeals(deal.id);
   render();
 }
@@ -2624,7 +2625,7 @@ function renderCard(deal) {
     ? "Unpin deal"
     : pinAllowed
       ? "Pin deal"
-      : `Maximum ${MAX_PINNED_PER_STAGE} pinned`;
+      : `Maximum ${MAX_PINNED_PER_STAGE} pinned in this column`;
   pinBtn.appendChild(pinTip);
 
   pinBtn.addEventListener("pointerdown", (e) => {
