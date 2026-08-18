@@ -96,6 +96,12 @@ let pendingPauseDealId = null;
 let pauseConfirmAction = "pause"; // "pause" | "unpause"
 let showPausedProspectsOnly = false;
 
+const pendingDraftOverlay = document.getElementById("pendingDraftOverlay");
+const pendingDraftTitle = document.getElementById("pendingDraftTitle");
+const pendingDraftLead = document.getElementById("pendingDraftLead");
+const pendingDraftConfirmBtn = document.getElementById("pendingDraftConfirmBtn");
+let pendingDraftKind = null; // "note" | "task"
+
 const commitOverlay = document.getElementById("commitOverlay");
 const commitForm = document.getElementById("commitForm");
 const commitDealName = document.getElementById("commitDealName");
@@ -916,6 +922,23 @@ function formatShortDate(timestamp) {
     month: "short",
     day: "numeric",
   });
+}
+
+function toTitleCase(value) {
+  return String(value || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) =>
+      word
+        .split("-")
+        .map((part) => {
+          if (!part) return part;
+          return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+        })
+        .join("-")
+    )
+    .join(" ");
 }
 
 function startOfMonth(date) {
@@ -4232,6 +4255,7 @@ function applyModalReadOnly(isReadOnly) {
 
 function closeModal() {
   closeAllFieldSuggestions();
+  closePendingDraftModal();
   overlay.hidden = true;
   editingId = null;
   modalReadOnly = false;
@@ -4314,19 +4338,76 @@ function permanentlyDeleteDeal() {
   finishUi();
 }
 
-form.addEventListener("submit", (e) => {
-  e.preventDefault();
-  if (modalReadOnly) return;
+function hasPendingNoteDraft() {
+  return Boolean(newNoteInput?.value.trim());
+}
 
+function hasPendingTaskDraft() {
+  return Boolean(newTaskNameInput?.value.trim());
+}
+
+function closePendingDraftModal() {
+  if (!pendingDraftOverlay) return;
+  pendingDraftOverlay.hidden = true;
+  pendingDraftKind = null;
+}
+
+function openPendingDraftModal(kind) {
+  pendingDraftKind = kind;
+  if (kind === "task") {
+    pendingDraftTitle.textContent = "Unadded task";
+    pendingDraftLead.textContent =
+      "You wrote a task name that hasn’t been added yet. Add it before saving this deal?";
+    pendingDraftConfirmBtn.textContent = "Yes, add task";
+  } else {
+    pendingDraftTitle.textContent = "Unadded note";
+    pendingDraftLead.textContent =
+      "You wrote a note that hasn’t been added yet. Add it before saving this deal?";
+    pendingDraftConfirmBtn.textContent = "Yes, add note";
+  }
+  pendingDraftOverlay.hidden = false;
+}
+
+function confirmPendingDraft() {
+  if (pendingDraftKind === "note") {
+    addActivityNote();
+    if (hasPendingNoteDraft()) return;
+    closePendingDraftModal();
+    if (hasPendingTaskDraft()) {
+      openPendingDraftModal("task");
+      return;
+    }
+    saveDealFromForm();
+    return;
+  }
+
+  if (pendingDraftKind === "task") {
+    if (newTaskDueInput && parseDateInput(newTaskDueInput.value) == null) {
+      newTaskDueInput.value = toDateInputValue(Date.now());
+    }
+    addDealTask();
+    if (hasPendingTaskDraft()) {
+      closePendingDraftModal();
+      setModalPanel("tasks");
+      if (parseDateInput(newTaskDueInput?.value) == null) newTaskDueInput?.focus();
+      else newTaskNameInput?.focus();
+      return;
+    }
+    closePendingDraftModal();
+    saveDealFromForm();
+  }
+}
+
+function saveDealFromForm() {
   const data = {
-    company: form.elements.company.value.trim(),
-    contact: form.elements.contact.value.trim(),
+    company: toTitleCase(form.elements.company.value),
+    contact: toTitleCase(form.elements.contact.value),
     phone: form.elements.phone.value.trim(),
     email: form.elements.email.value.trim(),
-    industry: form.elements.industry.value.trim(),
-    tool: form.elements.tool.value.trim(),
+    industry: toTitleCase(form.elements.industry.value),
+    tool: toTitleCase(form.elements.tool.value),
     value: Number(form.elements.value.value) || 0,
-    owner: form.elements.owner.value.trim(),
+    owner: toTitleCase(form.elements.owner.value),
     notes: modalNotes
       .map((note) => ({
         id: note.id,
@@ -4370,6 +4451,20 @@ form.addEventListener("submit", (e) => {
 
   render();
   closeModal();
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (modalReadOnly) return;
+  if (hasPendingNoteDraft()) {
+    openPendingDraftModal("note");
+    return;
+  }
+  if (hasPendingTaskDraft()) {
+    openPendingDraftModal("task");
+    return;
+  }
+  saveDealFromForm();
 });
 
 document.querySelectorAll(".modal-tab").forEach((tab) => {
@@ -4447,12 +4542,20 @@ pauseOverlay.addEventListener("click", (e) => {
   if (e.target === pauseOverlay) closePauseModal();
 });
 
+document.getElementById("pendingDraftConfirmBtn").addEventListener("click", confirmPendingDraft);
+document.getElementById("pendingDraftCancelBtn").addEventListener("click", closePendingDraftModal);
+document.getElementById("pendingDraftCloseBtn").addEventListener("click", closePendingDraftModal);
+pendingDraftOverlay.addEventListener("click", (e) => {
+  if (e.target === pendingDraftOverlay) closePendingDraftModal();
+});
+
 document.getElementById("newDealBtn").addEventListener("click", () => openModal());
 document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
 document.getElementById("cancelBtn").addEventListener("click", closeModal);
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!pauseOverlay.hidden) closePauseModal();
+  if (!pendingDraftOverlay.hidden) closePendingDraftModal();
+  else if (!pauseOverlay.hidden) closePauseModal();
   else if (!dismissOverlay.hidden) closeDismissModal();
   else if (!commitOverlay.hidden) closeCommitModal();
   else if (!overlay.hidden) closeModal();

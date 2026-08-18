@@ -669,6 +669,25 @@
     </div>
   </div>
 
+  <!-- Unadded note / task confirmation -->
+  <div class="modal-overlay" id="pendingDraftOverlay" hidden>
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="pendingDraftTitle">
+      <div class="modal-header">
+        <h2 id="pendingDraftTitle">Unadded note</h2>
+        <button class="icon-btn" id="pendingDraftCloseBtn" aria-label="Close">&times;</button>
+      </div>
+      <p class="modal-lead" id="pendingDraftLead">
+        You wrote a note that hasn’t been added yet. Add it before saving this deal?
+      </p>
+      <div class="modal-actions">
+        <div class="modal-actions-right">
+          <button type="button" class="btn btn-ghost" id="pendingDraftCancelBtn">No, go back</button>
+          <button type="button" class="btn btn-primary" id="pendingDraftConfirmBtn">Yes, add note</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Pause / unpause deal confirmation -->
   <div class="modal-overlay" id="pauseOverlay" hidden>
     <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
