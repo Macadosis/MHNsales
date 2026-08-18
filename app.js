@@ -1024,12 +1024,37 @@ function hasActiveFilters() {
   return FILTER_FIELDS.some(({ key }) => filters[key].size > 0);
 }
 
-function getFilterOptions(key) {
+function getFilterOptions(key, counts = getFilterValueCounts(key).counts) {
   return [...new Set(
     getActiveDeals()
       .map((deal) => (deal[key] || "").trim())
       .filter(Boolean)
-  )].sort((a, b) => a.localeCompare(b));
+  )].sort((a, b) => {
+    const byCount = (counts.get(b) || 0) - (counts.get(a) || 0);
+    if (byCount) return byCount;
+    return a.localeCompare(b);
+  });
+}
+
+function getFilterValueCounts(key) {
+  const counts = new Map();
+  let incomplete = 0;
+  for (const deal of getActiveDeals()) {
+    const value = (deal[key] || "").trim();
+    if (!value) {
+      incomplete += 1;
+      continue;
+    }
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return { counts, incomplete };
+}
+
+function appendFilterOptionCount(optionLabel, count) {
+  const countEl = document.createElement("span");
+  countEl.className = "filter-option-count";
+  countEl.textContent = `(${count})`;
+  optionLabel.appendChild(countEl);
 }
 
 function hasIncompleteValues(key) {
@@ -1348,7 +1373,8 @@ function renderFilters(containerEl, clearBtn) {
   containerEl.innerHTML = "";
 
   for (const { key, label } of FILTER_FIELDS) {
-    const options = getFilterOptions(key);
+    const { counts: optionCounts, incomplete: incompleteCount } = getFilterValueCounts(key);
+    const options = getFilterOptions(key, optionCounts);
     const selectedCount = filters[key].size;
 
     const dropdown = document.createElement("div");
@@ -1394,6 +1420,7 @@ function renderFilters(containerEl, clearBtn) {
         checkbox.checked = filters[key].has(INCOMPLETE_FILTER);
 
         const text = document.createElement("span");
+        text.className = "filter-option-name";
         text.textContent = "Incomplete";
 
         checkbox.addEventListener("change", () => {
@@ -1401,6 +1428,7 @@ function renderFilters(containerEl, clearBtn) {
         });
 
         optionLabel.append(checkbox, text);
+        appendFilterOptionCount(optionLabel, incompleteCount);
         menu.appendChild(optionLabel);
       }
 
@@ -1413,6 +1441,7 @@ function renderFilters(containerEl, clearBtn) {
         checkbox.checked = filters[key].has(option);
 
         const text = document.createElement("span");
+        text.className = "filter-option-name";
         text.textContent = option;
 
         checkbox.addEventListener("change", () => {
@@ -1420,6 +1449,7 @@ function renderFilters(containerEl, clearBtn) {
         });
 
         optionLabel.append(checkbox, text);
+        appendFilterOptionCount(optionLabel, optionCounts.get(option) || 0);
         menu.appendChild(optionLabel);
       }
     }
