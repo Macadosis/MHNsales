@@ -1021,7 +1021,7 @@ function formatMonthLabel(date) {
 /* ------------------------------ Filters ------------------------ */
 
 function hasActiveFilters() {
-  return FILTER_FIELDS.some(({ key }) => filters[key].size > 0);
+  return FILTER_FIELDS.some(({ key }) => filters[key].size > 0) || Boolean(searchQuery);
 }
 
 function getFilterOptions(key, counts = getFilterValueCounts(key).counts) {
@@ -1353,7 +1353,7 @@ function toggleFilterValue(key, value, checked) {
 function clearFilters() {
   for (const { key } of FILTER_FIELDS) filters[key].clear();
   openFilterKey = null;
-  render();
+  applySearch("", { skipSuggestions: true });
 }
 
 function closeFilterMenus() {
@@ -1487,26 +1487,10 @@ function isOverFilterDropdown(target) {
   return Boolean(target instanceof Element && target.closest(".filter-dropdown"));
 }
 
-function isOverSearchSuggestions(target) {
-  return Boolean(target instanceof Element && target.closest(".search-anchor"));
-}
-
-function anySearchSuggestionsOpen() {
-  for (const state of searchSuggestionState.values()) {
-    if (state.listEl && !state.listEl.hidden) return true;
-  }
-  return false;
-}
-
 document.addEventListener("pointermove", (e) => {
   if (!isMousePointer(e)) return;
-
   if (openFilterKey && !isOverFilterDropdown(e.target)) {
     closeFilterMenus();
-  }
-
-  if (anySearchSuggestionsOpen() && !isOverSearchSuggestions(e.target)) {
-    closeAllSearchSuggestions();
   }
 });
 
