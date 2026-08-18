@@ -691,17 +691,26 @@ main {
 }
 
 .filter-menu {
+  --filter-option-height: 31px;
+  --filter-menu-pad: 6px;
+  --filter-visible-rows: 6.5;
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
   min-width: 220px;
-  max-height: 260px;
+  /* 6.5 rows so the last visible option is clipped in half on open */
+  max-height: calc(
+    (var(--filter-option-height) * var(--filter-visible-rows)) +
+    (var(--filter-menu-pad) * 2)
+  );
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #d5d2c6 transparent;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lift);
-  padding: 6px;
+  padding: var(--filter-menu-pad);
   z-index: 30;
 }
 
@@ -711,11 +720,18 @@ main {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  height: var(--filter-option-height);
+  padding: 0 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
   color: var(--ink);
+  white-space: nowrap;
+}
+
+.filter-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .filter-option:hover { background: var(--bg-sunken); }
@@ -2817,6 +2833,8 @@ body.is-card-dragging .card {
   gap: 12px;
   max-height: 280px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #d5d2c6 transparent;
 }
 
 .activity-empty {
@@ -2935,6 +2953,8 @@ body.is-card-dragging .card {
   gap: 10px;
   max-height: 280px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #d5d2c6 transparent;
 }
 
 .deal-tasks-empty {
@@ -3217,14 +3237,22 @@ body.is-card-dragging .card {
 }
 
 .combobox-suggestions {
+  --suggestion-height: 34px;
+  --suggestion-pad: 4px;
+  --suggestion-visible-rows: 5.5;
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  max-height: 220px;
+  max-height: calc(
+    (var(--suggestion-height) * var(--suggestion-visible-rows)) +
+    (var(--suggestion-pad) * 2)
+  );
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #d5d2c6 transparent;
   margin: 0;
-  padding: 4px;
+  padding: var(--suggestion-pad);
   list-style: none;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -3238,11 +3266,15 @@ body.is-card-dragging .card {
 }
 
 .combobox-suggestion {
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  height: var(--suggestion-height);
+  padding: 0 10px;
   border-radius: var(--radius-sm);
   font-size: 14px;
   color: var(--ink);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .combobox-suggestion:hover,
@@ -3390,13 +3422,34 @@ body.is-card-dragging .card {
 
 .column-body::-webkit-scrollbar,
 .board::-webkit-scrollbar,
-.pipeline-chart::-webkit-scrollbar { width: 8px; height: 8px; }
+.pipeline-chart::-webkit-scrollbar,
+.filter-menu::-webkit-scrollbar,
+.combobox-suggestions::-webkit-scrollbar,
+.activity-notes::-webkit-scrollbar,
+.deal-tasks-list::-webkit-scrollbar,
+.import-table-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
 
 .column-body::-webkit-scrollbar-thumb,
 .board::-webkit-scrollbar-thumb,
-.pipeline-chart::-webkit-scrollbar-thumb {
+.pipeline-chart::-webkit-scrollbar-thumb,
+.filter-menu::-webkit-scrollbar-thumb,
+.combobox-suggestions::-webkit-scrollbar-thumb,
+.activity-notes::-webkit-scrollbar-thumb,
+.deal-tasks-list::-webkit-scrollbar-thumb,
+.import-table-wrap::-webkit-scrollbar-thumb {
   background: #d5d2c6;
   border-radius: 999px;
+}
+
+.filter-menu::-webkit-scrollbar-track,
+.combobox-suggestions::-webkit-scrollbar-track,
+.activity-notes::-webkit-scrollbar-track,
+.deal-tasks-list::-webkit-scrollbar-track,
+.import-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @media (max-width: 1100px) {
@@ -3938,6 +3991,8 @@ body.is-card-dragging .card {
   border-radius: var(--radius-md);
   background: var(--surface);
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #d5d2c6 transparent;
 }
 
 .import-table {
