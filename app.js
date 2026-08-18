@@ -752,6 +752,10 @@ function makeDealCreationNote(timestamp, createdBy) {
   };
 }
 
+function isDealCreationNote(note) {
+  return (note?.text || "").trim() === DEAL_CREATION_NOTE_TEXT;
+}
+
 function migrateDeals({ persist = true } = {}) {
   let changed = false;
   const changedIds = new Set();
@@ -3412,7 +3416,12 @@ function renderActivityNotes() {
     return;
   }
 
-  const sorted = [...modalNotes].sort((a, b) => b.createdAt - a.createdAt);
+  const sorted = [...modalNotes].sort((a, b) => {
+    const aBirth = isDealCreationNote(a) ? 1 : 0;
+    const bBirth = isDealCreationNote(b) ? 1 : 0;
+    if (aBirth !== bBirth) return aBirth - bBirth;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
 
   for (const note of sorted) {
     const card = document.createElement("article");
