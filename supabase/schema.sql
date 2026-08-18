@@ -21,6 +21,7 @@ create table if not exists public.deals (
   committed_at timestamptz,
   dismissed_at timestamptz,
   paused_at timestamptz,
+  pinned_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   notes jsonb not null default '[]'::jsonb
@@ -32,6 +33,9 @@ alter table public.deals
 
 alter table public.deals
   add column if not exists paused_at timestamptz;
+
+alter table public.deals
+  add column if not exists pinned_at timestamptz;
 
 alter table public.deals
   add column if not exists tasks jsonb not null default '[]'::jsonb;

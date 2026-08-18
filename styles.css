@@ -986,6 +986,90 @@ main {
   background: #fbfaf7;
 }
 
+.card-pin-btn {
+  position: absolute;
+  top: 10px;
+  right: 34px;
+  z-index: 2;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #e4e1d8;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.card-pin-btn:hover {
+  color: var(--ink-faint);
+  background: var(--bg-sunken);
+}
+
+.card.is-pinned .card-pin-btn {
+  color: var(--accent);
+}
+
+.card.is-pinned .card-pin-btn:hover {
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+}
+
+.card-pin-btn.is-capped {
+  cursor: default;
+}
+
+.card-pin-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+  transform: rotate(18deg);
+}
+
+.card.is-pinned .card-pin-icon {
+  transform: rotate(22deg);
+}
+
+.card-pin-tip {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--ink);
+  border-radius: 6px;
+  padding: 5px 8px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  box-shadow: 0 4px 12px rgba(20, 20, 19, 0.18);
+}
+
+.card-pin-tip::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: 8px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 4px solid var(--ink);
+}
+
+.card-pin-btn:hover .card-pin-tip,
+.card-pin-btn:focus-visible .card-pin-tip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .card-pause-btn {
   position: absolute;
   top: 8px;
@@ -1136,7 +1220,7 @@ body.is-card-dragging .card {
   align-items: baseline;
   flex-wrap: wrap;
   gap: 6px 8px;
-  margin: 0 28px 2px 0;
+  margin: 0 52px 2px 0;
 }
 
 .card-company-name {

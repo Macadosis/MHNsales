@@ -61,6 +61,9 @@ alter table public.deals
   add column if not exists paused_at timestamptz;
 
 alter table public.deals
+  add column if not exists pinned_at timestamptz;
+
+alter table public.deals
   add column if not exists notes jsonb not null default '[]'::jsonb;
 
 alter table public.deals

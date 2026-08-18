@@ -849,6 +849,13 @@ function compareBoardOrder(a, b) {
   return (a.createdAt || 0) - (b.createdAt || 0);
 }
 
+function compareColumnOrder(a, b) {
+  const ap = isDealPinned(a) ? 0 : 1;
+  const bp = isDealPinned(b) ? 0 : 1;
+  if (ap !== bp) return ap - bp;
+  return compareBoardOrder(a, b);
+}
+
 function getStageDeals(stage, { excludeId } = {}) {
   return deals
     .filter(
@@ -857,7 +864,7 @@ function getStageDeals(stage, { excludeId } = {}) {
         d.stage === stage &&
         d.id !== excludeId
     )
-    .sort(compareBoardOrder);
+    .sort(compareColumnOrder);
 }
 
 /** Paused deals always live under Prospects. */
@@ -1035,6 +1042,41 @@ function getActiveDeals() {
 
 function isDealPaused(deal) {
   return Boolean(deal?.pausedAt);
+}
+
+function isDealPinned(deal) {
+  return Boolean(deal?.pinnedAt);
+}
+
+const MAX_PINNED_PER_STAGE = 10;
+
+function countPinnedInStage(stage, { excludeId } = {}) {
+  return deals.filter(
+    (d) =>
+      !d.dismissedAt &&
+      d.stage === stage &&
+      d.id !== excludeId &&
+      isDealPinned(d)
+  ).length;
+}
+
+function canPinDeal(deal) {
+  if (!deal || deal.stage === "dismissed" || deal.dismissedAt) return false;
+  if (isDealPinned(deal)) return true;
+  return countPinnedInStage(deal.stage, { excludeId: deal.id }) < MAX_PINNED_PER_STAGE;
+}
+
+function toggleDealPin(deal) {
+  if (!deal || deal.stage === "dismissed" || deal.dismissedAt) return;
+  if (isDealPinned(deal)) {
+    delete deal.pinnedAt;
+  } else if (!canPinDeal(deal)) {
+    return;
+  } else {
+    deal.pinnedAt = Date.now();
+  }
+  saveDeals(deal.id);
+  render();
 }
 
 function nextCardSiblingId(el) {
@@ -2377,10 +2419,10 @@ function renderColumn(stage, visibleDeals) {
   // Paused deals always belong under Prospects, even if stage drifted.
   const activeDeals = visibleDeals
     .filter((d) => d.stage === stage.id && !isDealPaused(d))
-    .sort(compareBoardOrder);
+    .sort(compareColumnOrder);
   const pausedDeals =
     stage.id === "prospects"
-      ? visibleDeals.filter((d) => isDealPaused(d)).sort(compareBoardOrder)
+      ? visibleDeals.filter((d) => isDealPaused(d)).sort(compareColumnOrder)
       : [];
   const pausedView =
     stage.id === "prospects" && showPausedProspectsOnly && pausedDeals.length > 0;
@@ -2507,6 +2549,41 @@ function renderCard(deal) {
   card.className = "card";
   card.dataset.id = deal.id;
   if (isDealPaused(deal)) card.classList.add("is-paused");
+  if (isDealPinned(deal)) card.classList.add("is-pinned");
+
+  const pinBtn = document.createElement("button");
+  pinBtn.type = "button";
+  pinBtn.className = "card-pin-btn";
+  pinBtn.setAttribute("aria-pressed", isDealPinned(deal) ? "true" : "false");
+  const pinAllowed = canPinDeal(deal);
+  pinBtn.setAttribute(
+    "aria-label",
+    isDealPinned(deal)
+      ? "Unpin deal"
+      : pinAllowed
+        ? "Pin deal"
+        : `Maximum ${MAX_PINNED_PER_STAGE} pinned deals in this column`
+  );
+  if (!isDealPinned(deal) && !pinAllowed) pinBtn.classList.add("is-capped");
+  pinBtn.innerHTML = `<svg class="card-pin-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.86-1.28 3.41-3 3.86V14h5.2v7h1.6v-7H19v-1.14C17.28 12.41 16 10.86 16 9z"/></svg>`;
+
+  const pinTip = document.createElement("span");
+  pinTip.className = "card-pin-tip";
+  pinTip.textContent = isDealPinned(deal)
+    ? "Unpin deal"
+    : pinAllowed
+      ? "Pin deal"
+      : `Maximum ${MAX_PINNED_PER_STAGE} pinned`;
+  pinBtn.appendChild(pinTip);
+
+  pinBtn.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+  });
+  pinBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleDealPin(deal);
+  });
 
   const pauseBtn = document.createElement("button");
   pauseBtn.type = "button";
@@ -2580,7 +2657,7 @@ function renderCard(deal) {
     row.appendChild(owner);
   }
 
-  card.append(pauseBtn, company);
+  card.append(pinBtn, pauseBtn, company);
   if (meta.textContent) card.append(meta);
   if (tags.childElementCount) card.append(tags);
   card.append(row);
@@ -2592,7 +2669,7 @@ function renderCard(deal) {
       delete card.dataset.suppressClick;
       return;
     }
-    if (e.target.closest(".card-pause-btn")) return;
+    if (e.target.closest(".card-pause-btn, .card-pin-btn")) return;
     openModal({ deal });
   });
 
@@ -3039,6 +3116,12 @@ function commitDragDrop(clientX, clientY) {
   if (isDealPaused(deal) && deal.stage !== "prospects") {
     delete deal.pausedAt;
   }
+  if (
+    isDealPinned(deal) &&
+    countPinnedInStage(deal.stage, { excludeId: deal.id }) >= MAX_PINNED_PER_STAGE
+  ) {
+    delete deal.pinnedAt;
+  }
   saveDeals(getStageDeals(target.stage).map((d) => d.id));
   render();
 }
@@ -3047,7 +3130,7 @@ function attachCardPointerDrag(card, deal) {
   card.addEventListener("pointerdown", (e) => {
     if (e.button != null && e.button !== 0) return;
     if (e.isPrimary === false) return;
-    if (e.target.closest(".card-pause-btn")) return;
+    if (e.target.closest(".card-pause-btn, .card-pin-btn")) return;
     if (dragState) cleanupDrag();
 
     dragState = {
@@ -4342,6 +4425,7 @@ function dismissDeal() {
   deal.stage = "dismissed";
   deal.dismissedAt = Date.now();
   delete deal.pausedAt;
+  delete deal.pinnedAt;
   saveDeals(deal.id);
   render();
   closeDismissModal();

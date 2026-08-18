@@ -194,6 +194,7 @@ function dealToRow(deal, { nextVersion } = {}) {
     committed_at: msToIso(deal.committedAt),
     dismissed_at: msToIso(deal.dismissedAt),
     paused_at: msToIso(deal.pausedAt),
+    pinned_at: msToIso(deal.pinnedAt),
     created_at: msToIso(deal.createdAt) || new Date().toISOString(),
     updated_at: new Date().toISOString(),
     notes: Array.isArray(deal.notes) ? deal.notes : [],
@@ -222,6 +223,7 @@ function rowToDeal(row) {
     committedAt: isoToMs(row.committed_at) ?? undefined,
     dismissedAt: isoToMs(row.dismissed_at) ?? undefined,
     pausedAt: isoToMs(row.paused_at) ?? undefined,
+    pinnedAt: isoToMs(row.pinned_at) ?? undefined,
     createdAt: isoToMs(row.created_at) || Date.now(),
     notes: Array.isArray(row.notes) ? row.notes : [],
     tasks: Array.isArray(row.tasks) ? row.tasks : [],
@@ -304,6 +306,10 @@ async function withColumnCompat(run) {
     }
     if (/paused_at/i.test(msg) && !omit.has("paused_at")) {
       omit.add("paused_at");
+      continue;
+    }
+    if (/pinned_at/i.test(msg) && !omit.has("pinned_at")) {
+      omit.add("pinned_at");
       continue;
     }
     return result;

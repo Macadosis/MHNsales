@@ -52,7 +52,7 @@ where table_schema = 'public' and table_name = 'deals'
 order by ordinal_position;
 ```
 
-Columns the app expects today: `id`, `company`, `contact`, `phone`, `email`, `industry`, `tool`, `value`, `owner`, `stage`, `implementation_days`, `committed_at`, `dismissed_at`, `paused_at`, `created_at`, `updated_at`, `notes`, `board_order`, `tasks`, `version`.
+Columns the app expects today: `id`, `company`, `contact`, `phone`, `email`, `industry`, `tool`, `value`, `owner`, `stage`, `implementation_days`, `committed_at`, `dismissed_at`, `paused_at`, `pinned_at`, `created_at`, `updated_at`, `notes`, `board_order`, `tasks`, `version`.
 
 
 ## Setup
