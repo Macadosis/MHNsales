@@ -167,6 +167,19 @@ const appShell = document.getElementById("appShell");
 const userChip = document.getElementById("userChip");
 const userChipName = document.getElementById("userChipName");
 const logoutBtn = document.getElementById("logoutBtn");
+const editNameBtn = document.getElementById("editNameBtn");
+const editNameMenuBtn = document.getElementById("editNameMenuBtn");
+const nameOverlay = document.getElementById("nameOverlay");
+const nameForm = document.getElementById("nameForm");
+const nameInput = document.getElementById("nameInput");
+const nameTitle = document.getElementById("nameTitle");
+const nameLead = document.getElementById("nameLead");
+const nameCloseBtn = document.getElementById("nameCloseBtn");
+const nameCancelBtn = document.getElementById("nameCancelBtn");
+const nameSaveBtn = document.getElementById("nameSaveBtn");
+const nameAuthError = document.getElementById("nameAuthError");
+let namePromptRequired = false;
+let nameBusy = false;
 
 let authMode = "login"; // login only — self-signup is disabled
 let authBusy = false;
@@ -251,12 +264,95 @@ function updateUserChip() {
 
 function applyAuthUser(user) {
   currentUser = user
-    ? { id: user.id, email: user.email || "", name: user.name || "" }
+    ? {
+        id: user.id,
+        email: user.email || "",
+        name: user.name || "",
+        needsName: Boolean(user.needsName),
+      }
     : null;
   if (currentUser) {
     showAppShell();
   } else {
+    namePromptRequired = false;
+    if (nameOverlay) nameOverlay.hidden = true;
     showLoginScreen();
+  }
+}
+
+function setNameMessage(error = "") {
+  if (!nameAuthError) return;
+  nameAuthError.textContent = error;
+  nameAuthError.hidden = !error;
+}
+
+function openNameModal({ required = false } = {}) {
+  if (!nameOverlay || !nameForm) return;
+  namePromptRequired = required;
+  setNameMessage();
+  nameTitle.textContent = required ? "What’s your name?" : "Edit name";
+  nameLead.textContent = required
+    ? "This name appears on the board and is used as Owner on deals you create."
+    : "This name appears on the board and is used as Owner on deals you create.";
+  nameInput.value = currentUser?.needsName ? "" : (currentUser?.name || "");
+  nameCloseBtn.hidden = required;
+  nameCancelBtn.hidden = required;
+  nameOverlay.hidden = false;
+  requestAnimationFrame(() => nameInput.focus());
+}
+
+function closeNameModal() {
+  if (namePromptRequired) return;
+  if (nameOverlay) nameOverlay.hidden = true;
+  setNameMessage();
+  nameBusy = false;
+}
+
+function maybePromptProfileName() {
+  if (currentUser?.needsName) openNameModal({ required: true });
+}
+
+async function handleNameSubmit(e) {
+  e.preventDefault();
+  if (nameBusy) return;
+  const auth = window.MHN_AUTH;
+  if (!auth?.updateProfileName) {
+    setNameMessage("Could not save your name. Try again.");
+    return;
+  }
+
+  const nextName = nameInput.value.trim();
+  if (!nextName) {
+    setNameMessage("Please enter your name.");
+    nameInput.focus();
+    return;
+  }
+
+  nameBusy = true;
+  nameSaveBtn.disabled = true;
+  nameSaveBtn.textContent = "Saving…";
+  setNameMessage();
+
+  try {
+    const previousName = currentUser?.name || "";
+    const result = await auth.updateProfileName(nextName);
+    if (!result.ok) {
+      setNameMessage(result.error || "Could not save your name.");
+      return;
+    }
+    applyAuthUser(result.user);
+    if (form?.elements?.owner && form.elements.owner.value === previousName) {
+      form.elements.owner.value = result.user?.name || nextName;
+    }
+    namePromptRequired = false;
+    nameOverlay.hidden = true;
+  } catch (err) {
+    console.error(err);
+    setNameMessage("Could not save your name. Try again.");
+  } finally {
+    nameBusy = false;
+    nameSaveBtn.disabled = false;
+    nameSaveBtn.textContent = "Save name";
   }
 }
 
@@ -303,6 +399,7 @@ async function handleLoginSubmit(e) {
     await offerSavePassword(email, password, result.user?.name);
     applyAuthUser(result.user);
     await startApp();
+    maybePromptProfileName();
   } catch (err) {
     console.error(err);
     setAuthMessage({ error: "Something went wrong. Please try again." });
@@ -360,8 +457,22 @@ function syncErrorDetail(err) {
 }
 
 function applySaveResult(result) {
-  if (result?.deals && Array.isArray(result.deals)) {
+  if (result?.rehydrated && result?.deals && Array.isArray(result.deals)) {
     deals = result.deals;
+  } else {
+    const updates = [
+      ...(Array.isArray(result?.written) ? result.written : []),
+      ...(Array.isArray(result?.conflicts) ? result.conflicts : []),
+    ];
+    if (updates.length) {
+      const byId = new Map(updates.filter((d) => d?.id).map((d) => [d.id, d]));
+      deals = deals.map((d) => (byId.has(d.id) ? byId.get(d.id) : d));
+      for (const deal of byId.values()) {
+        if (!deals.some((d) => d.id === deal.id)) deals.push(deal);
+      }
+    } else if (result?.deals && Array.isArray(result.deals)) {
+      deals = result.deals;
+    }
   }
   if (result?.writeBlocked) {
     if (result.reason === "not-hydrated") {
@@ -376,8 +487,13 @@ function applySaveResult(result) {
   }
   if (result?.conflict) {
     const n = Array.isArray(result.conflicts) ? result.conflicts.length : 0;
-    const label =
-      n === 1
+    const editingConflict =
+      editingId &&
+      Array.isArray(result.conflicts) &&
+      result.conflicts.some((d) => d.id === editingId);
+    const label = editingConflict
+      ? "This deal changed elsewhere. Your form is kept — save again to apply your edits on the latest version."
+      : n === 1
         ? "Conflict — that deal changed elsewhere. Loaded the latest version."
         : `Conflict — ${n || "some"} deals changed elsewhere. Loaded the latest versions.`;
     showSyncStatus(label, true, true);
@@ -392,38 +508,68 @@ function applySaveResult(result) {
   }
 }
 
-/**
- * Persist local cache and upsert only the affected deal row(s).
- * @param {string|string[]|null} affectedDealIds changed deal id(s); omit only for local-only cache write
- */
-function saveDeals(affectedDealIds) {
-  // Ignore stale realtime echoes while our write is in flight, so a just-dropped
-  // card isn't immediately snapped back to its old stage.
-  suppressRemoteRefreshUntil = Date.now() + 1500;
-  pendingRemoteRefresh = false;
-  const api = window.MHN_DB;
+let saveQueue = Promise.resolve();
+const saveQueuedIds = new Set();
+let saveInFlight = false;
 
-  let ids = [];
+function queueDealIds(affectedDealIds) {
   if (typeof affectedDealIds === "string" && affectedDealIds) {
-    ids = [affectedDealIds];
+    saveQueuedIds.add(affectedDealIds);
   } else if (Array.isArray(affectedDealIds)) {
-    ids = [...new Set(affectedDealIds.filter(Boolean))];
+    for (const id of affectedDealIds) {
+      if (id) saveQueuedIds.add(id);
+    }
   }
+}
 
-  const toWrite = ids.length ? deals.filter((d) => ids.includes(d.id)) : [];
-
-  if (api?.upsertDealsAsync) {
-    api.upsertDealsAsync(toWrite, deals).then(applySaveResult).catch((err) => {
+async function flushQueuedSaves() {
+  const api = window.MHN_DB;
+  while (saveQueuedIds.size) {
+    const ids = [...saveQueuedIds];
+    saveQueuedIds.clear();
+    const toWrite = deals.filter((d) => ids.includes(d.id));
+    saveInFlight = true;
+    try {
+      if (api?.upsertDealsAsync) {
+        const result = await api.upsertDealsAsync(toWrite, deals);
+        applySaveResult(result);
+      } else {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
+      }
+    } catch (err) {
       console.error(err);
       showSyncStatus(
         `Could not sync to cloud — changes kept locally${syncErrorDetail(err)}`,
         true,
         true
       );
-    });
-  } else {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
+    } finally {
+      saveInFlight = false;
+    }
   }
+  if (pendingRemoteRefresh) {
+    pendingRemoteRefresh = false;
+    await refreshDealsFromRemote();
+  }
+}
+
+/**
+ * Persist local cache and upsert only the affected deal row(s).
+ * Saves are serialized so two rapid edits cannot send the same version.
+ * @param {string|string[]|null} affectedDealIds changed deal id(s); omit only for local-only cache write
+ */
+function saveDeals(affectedDealIds) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(deals));
+  } catch {
+    /* ignore quota / private mode */
+  }
+  // Ignore our own realtime echo while a write is in flight.
+  suppressRemoteRefreshUntil = Date.now() + 400;
+  queueDealIds(affectedDealIds);
+  saveQueue = saveQueue.then(flushQueuedSaves).catch((err) => {
+    console.error(err);
+  });
 }
 
 function showSyncStatus(message, isError = false, sticky = false) {
@@ -463,6 +609,17 @@ function showCloudReadOnlyBanner() {
 let lastRenderedSignature = null;
 let pendingRemoteRefresh = false;
 let suppressRemoteRefreshUntil = 0;
+let pendingRemoteRefreshTimer = 0;
+
+function schedulePendingRemoteRefresh() {
+  clearTimeout(pendingRemoteRefreshTimer);
+  const wait = Math.max(0, suppressRemoteRefreshUntil - Date.now()) + 30;
+  pendingRemoteRefreshTimer = setTimeout(() => {
+    if (!pendingRemoteRefresh || saveInFlight || saveQueuedIds.size || dragState) return;
+    pendingRemoteRefresh = false;
+    refreshDealsFromRemote();
+  }, wait);
+}
 
 function showLoadSyncStatus(api) {
   if (!api?.isRemote) return;
@@ -505,7 +662,15 @@ function showLoadSyncStatus(api) {
 async function refreshDealsFromRemote() {
   const api = window.MHN_DB;
   if (!api?.isRemote || !api.loadDealsAsync) return;
-  if (Date.now() < suppressRemoteRefreshUntil) return;
+  if (saveInFlight || saveQueuedIds.size) {
+    pendingRemoteRefresh = true;
+    return;
+  }
+  if (Date.now() < suppressRemoteRefreshUntil) {
+    pendingRemoteRefresh = true;
+    schedulePendingRemoteRefresh();
+    return;
+  }
   // Never rebuild the board mid-drag; queue the update until the drag ends.
   if (dragState) {
     pendingRemoteRefresh = true;
@@ -513,7 +678,28 @@ async function refreshDealsFromRemote() {
   }
   try {
     syncingFromRemote = true;
-    deals = await api.loadDealsAsync();
+    const incoming = await api.loadDealsAsync();
+    const editingOpen = Boolean(editingId && overlay && !overlay.hidden);
+    if (editingOpen) {
+      const before = deals.find((d) => d.id === editingId);
+      const after = incoming.find((d) => d.id === editingId);
+      const beforeVer = Number(before?.version) || 0;
+      const afterVer = Number(after?.version) || 0;
+      if (before && after && afterVer !== beforeVer) {
+        showSyncStatus(
+          "This deal changed elsewhere. Your form is kept — save to apply your edits on the latest version, or close without saving to take theirs.",
+          true,
+          true
+        );
+      } else if (before && !after) {
+        showSyncStatus(
+          "This deal was removed or changed elsewhere while you were editing.",
+          true,
+          true
+        );
+      }
+    }
+    deals = incoming;
     migrateDeals({ persist: Boolean(api.cloudWriteEnabled) });
     const meta = api.lastLoadMeta || {};
     if (meta.source === "local-pending" || meta.flushError || api.hasPendingSync) {
@@ -5268,6 +5454,7 @@ async function bootstrap() {
     }
     applyAuthUser(user);
     await startApp();
+    maybePromptProfileName();
   } catch (err) {
     console.error(err);
     showLoginScreen();
@@ -5281,7 +5468,12 @@ async function bootstrap() {
     }
     // Keep chip/name in sync if metadata changes; don't restart the app mid-session.
     if (currentUser?.id === user.id) {
-      currentUser = { id: user.id, email: user.email || "", name: user.name || "" };
+      currentUser = {
+        id: user.id,
+        email: user.email || "",
+        name: user.name || "",
+        needsName: Boolean(user.needsName),
+      };
       updateUserChip();
     }
   });
@@ -5326,8 +5518,6 @@ async function startApp() {
   if (api?.subscribeToDealChanges) {
     api.subscribeToDealChanges(() => {
       if (syncingFromRemote) return;
-      if (!overlay.hidden || !commitOverlay.hidden || !dismissOverlay.hidden) return;
-      if (!importOverlay.hidden) return;
       refreshDealsFromRemote();
     });
   }
@@ -5335,6 +5525,17 @@ async function startApp() {
 
 loginForm.addEventListener("submit", handleLoginSubmit);
 signupForm.addEventListener("submit", handleSignupSubmit);
+nameForm?.addEventListener("submit", handleNameSubmit);
+nameCloseBtn?.addEventListener("click", closeNameModal);
+nameCancelBtn?.addEventListener("click", closeNameModal);
+nameOverlay?.addEventListener("click", (e) => {
+  if (e.target === nameOverlay) closeNameModal();
+});
+editNameBtn?.addEventListener("click", () => openNameModal({ required: false }));
+editNameMenuBtn?.addEventListener("click", () => {
+  closeNavMenu();
+  openNameModal({ required: false });
+});
 logoutBtn.addEventListener("click", () => {
   logout();
 });

@@ -144,12 +144,14 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="tasks">Tasks</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="dashboard">Dashboard</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="history">History</button>
+        <button type="button" class="nav-menu-logout nav-menu-edit-name" id="editNameMenuBtn">Edit name</button>
         <button type="button" class="nav-menu-logout" id="logoutMenuBtn">Log out</button>
       </nav>
     </div>
     <div class="topbar-actions">
       <div class="user-chip" id="userChip" hidden>
         <span class="user-chip-label" id="userChipName"></span>
+        <button type="button" class="user-chip-logout" id="editNameBtn">Edit name</button>
         <button type="button" class="user-chip-logout" id="logoutBtn" aria-label="Log out">
           Log out
         </button>
@@ -379,6 +381,40 @@
     </section>
   </main>
   </div><!-- /.app-shell -->
+
+  <!-- Profile name (first login + edit) -->
+  <div class="modal-overlay" id="nameOverlay" hidden>
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="nameTitle">
+      <div class="modal-header">
+        <h2 id="nameTitle">Your name</h2>
+        <button class="icon-btn" id="nameCloseBtn" aria-label="Close">&times;</button>
+      </div>
+      <p class="modal-lead" id="nameLead">
+        This name appears on the board and is used as Owner on deals you create.
+      </p>
+      <form id="nameForm" autocomplete="name">
+        <label class="field">
+          <span class="field-label">Name</span>
+          <input
+            type="text"
+            id="nameInput"
+            name="name"
+            required
+            maxlength="80"
+            placeholder="e.g. Alex Müller"
+            autocomplete="name"
+          />
+        </label>
+        <p class="auth-error" id="nameAuthError" hidden role="alert"></p>
+        <div class="modal-actions">
+          <div class="modal-actions-right">
+            <button type="button" class="btn btn-ghost" id="nameCancelBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="nameSaveBtn">Save name</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Card create / edit modal -->
   <div class="modal-overlay" id="modalOverlay" hidden>

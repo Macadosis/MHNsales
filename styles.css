@@ -247,7 +247,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 220px;
+  max-width: 340px;
   padding: 4px 4px 4px 12px;
   background: var(--bg-sunken);
   border: 1px solid var(--line);
@@ -340,6 +340,10 @@ body {
 
 .nav-menu-logout {
   display: none;
+}
+
+.nav-menu-edit-name {
+  color: var(--ink);
 }
 
 .nav-burger {
@@ -2734,6 +2738,10 @@ body.is-card-dragging .card {
 
 .modal-overlay[hidden] { display: none; }
 
+#nameOverlay {
+  z-index: 80;
+}
+
 .modal {
   background: var(--bg);
   border-radius: var(--radius-lg);
@@ -3492,6 +3500,19 @@ body.is-card-dragging .card {
 
   .nav-menu-logout:hover {
     background: #f7e8e5;
+  }
+
+  .nav-menu-edit-name {
+    border-top: 1px solid var(--line);
+    color: var(--ink);
+  }
+
+  .nav-menu-edit-name:hover {
+    background: var(--bg-sunken);
+  }
+
+  .nav-menu-logout:not(.nav-menu-edit-name) {
+    border-top: none;
   }
 
   .new-deal-btn {

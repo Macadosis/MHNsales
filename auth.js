@@ -4,27 +4,40 @@ function getAuthClient() {
   return window.MHN_DB?.client || null;
 }
 
-function displayNameFromUser(user) {
-  if (!user) return "";
-  const meta = user.user_metadata || {};
+function profileNameFromMeta(user) {
+  const meta = user?.user_metadata || {};
   const fromMeta =
     meta.full_name ||
     meta.name ||
     meta.display_name ||
     "";
-  if (typeof fromMeta === "string" && fromMeta.trim()) return fromMeta.trim();
+  return typeof fromMeta === "string" ? fromMeta.trim() : "";
+}
+
+function hasProfileName(user) {
+  return Boolean(profileNameFromMeta(user));
+}
+
+function displayNameFromUser(user) {
+  if (!user) return "";
+  const named = profileNameFromMeta(user);
+  if (named) return named;
   const email = user.email || "";
   const local = email.split("@")[0] || "";
   return local.trim();
 }
 
 function sessionToUser(session) {
-  const user = session?.user;
-  if (!user) return null;
+  return authUserToAppUser(session?.user);
+}
+
+function authUserToAppUser(authUser) {
+  if (!authUser) return null;
   return {
-    id: user.id,
-    email: user.email || "",
-    name: displayNameFromUser(user),
+    id: authUser.id,
+    email: authUser.email || "",
+    name: displayNameFromUser(authUser),
+    needsName: !hasProfileName(authUser),
   };
 }
 
@@ -96,6 +109,37 @@ async function signIn({ email, password }) {
   };
 }
 
+async function updateProfileName(name) {
+  const client = getAuthClient();
+  if (!client) {
+    return { ok: false, error: "Supabase is not configured. Add credentials in config.js." };
+  }
+
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return { ok: false, error: "Please enter your name." };
+  if (trimmed.length > 80) return { ok: false, error: "Name is too long." };
+
+  const { data, error } = await client.auth.updateUser({
+    data: {
+      full_name: trimmed,
+      name: trimmed,
+      display_name: trimmed,
+    },
+  });
+
+  if (error) return { ok: false, error: friendlyAuthError(error) };
+
+  const { data: fresh, error: freshError } = await client.auth.getUser();
+  if (freshError) {
+    return { ok: true, user: authUserToAppUser(data.user) };
+  }
+
+  return {
+    ok: true,
+    user: authUserToAppUser(fresh.user) || authUserToAppUser(data.user),
+  };
+}
+
 async function signOut() {
   const client = getAuthClient();
   if (!client) return { ok: true };
@@ -120,6 +164,7 @@ window.MHN_AUTH = {
   getSession,
   getCurrentAuthUser,
   displayNameFromUser,
+  updateProfileName,
   signUp,
   signIn,
   signOut,

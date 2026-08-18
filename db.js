@@ -571,10 +571,12 @@ async function upsertDealsAsync(dealsToWrite, allDeals) {
   try {
     let next = cache;
     let conflicts = [];
+    let written = [];
     let wrote = false;
     if (toWrite.length) {
       const result = await writeDealsToRemote(toWrite);
       conflicts = result.conflicts;
+      written = result.written;
       next = mergeDealsById(cache, [...result.written, ...result.conflicts]);
       saveLocalDeals(next);
       clearPendingUpserts(ids);
@@ -586,6 +588,7 @@ async function upsertDealsAsync(dealsToWrite, allDeals) {
       wroteToCloud: wrote || conflicts.length === 0,
       conflict: conflicts.length > 0,
       conflicts,
+      written,
       deals: next,
     };
   } catch (err) {
