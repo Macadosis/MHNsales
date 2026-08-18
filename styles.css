@@ -648,6 +648,16 @@ main {
   flex-shrink: 0;
 }
 
+.filter-dropdown:has(.filter-menu:not([hidden]))::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 220px;
+  top: 100%;
+  height: 8px;
+  z-index: 31;
+}
+
 .filter-trigger {
   display: inline-flex;
   align-items: center;

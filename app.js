@@ -1479,6 +1479,37 @@ clearFiltersBtn.addEventListener("click", clearFilters);
 pipelineClearFiltersBtn.addEventListener("click", clearFilters);
 dashboardClearFiltersBtn.addEventListener("click", clearFilters);
 
+function isMousePointer(e) {
+  return !e.pointerType || e.pointerType === "mouse";
+}
+
+function isOverFilterDropdown(target) {
+  return Boolean(target instanceof Element && target.closest(".filter-dropdown"));
+}
+
+function isOverSearchSuggestions(target) {
+  return Boolean(target instanceof Element && target.closest(".search-anchor"));
+}
+
+function anySearchSuggestionsOpen() {
+  for (const state of searchSuggestionState.values()) {
+    if (state.listEl && !state.listEl.hidden) return true;
+  }
+  return false;
+}
+
+document.addEventListener("pointermove", (e) => {
+  if (!isMousePointer(e)) return;
+
+  if (openFilterKey && !isOverFilterDropdown(e.target)) {
+    closeFilterMenus();
+  }
+
+  if (anySearchSuggestionsOpen() && !isOverSearchSuggestions(e.target)) {
+    closeAllSearchSuggestions();
+  }
+});
+
 /* ------------------------------ Search ------------------------- */
 
 const searchBubble = document.getElementById("searchBubble");
