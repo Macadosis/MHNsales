@@ -194,6 +194,15 @@ function getCurrentUserName() {
   return currentUser?.name || "";
 }
 
+function formatActorStamp(name) {
+  const trimmed = String(name || "").trim();
+  return trimmed ? ` by ${trimmed}` : "";
+}
+
+function stampCurrentUser(fallback = "") {
+  return getCurrentUserName().trim() || String(fallback || "").trim();
+}
+
 function setAuthMessage({ error = "", success = "" } = {}) {
   loginAuthError.classList.remove("is-info");
   loginAuthError.textContent = error;
@@ -731,12 +740,15 @@ async function refreshDealsFromRemote() {
 
 const DEAL_CREATION_NOTE_TEXT = "Deal card created";
 
-function makeDealCreationNote(timestamp) {
+function makeDealCreationNote(timestamp, createdBy) {
+  const by = String(createdBy || getCurrentUserName() || "").trim();
   return {
     id: crypto.randomUUID(),
     text: DEAL_CREATION_NOTE_TEXT,
     createdAt: timestamp,
     updatedAt: timestamp,
+    createdBy: by,
+    updatedBy: by,
   };
 }
 
@@ -766,7 +778,22 @@ function migrateDeals({ persist = true } = {}) {
     if (created) {
       const notes = deal.notes || [];
       if (!notes.some((note) => note.createdAt === created)) {
-        deal.notes = [makeDealCreationNote(created), ...notes];
+        deal.notes = [makeDealCreationNote(created, deal.owner), ...notes];
+        changed = true;
+        changedIds.add(deal.id);
+      }
+    }
+
+    const ownerName = (deal.owner || "").trim();
+    if (Array.isArray(deal.notes)) {
+      let notesChanged = false;
+      for (const note of deal.notes) {
+        if (!note.createdBy && ownerName) {
+          note.createdBy = ownerName;
+          notesChanged = true;
+        }
+      }
+      if (notesChanged) {
         changed = true;
         changedIds.add(deal.id);
       }
@@ -786,6 +813,10 @@ function migrateDeals({ persist = true } = {}) {
           continue;
         }
         if (Number(raw.dueAt) !== task.dueAt) tasksChanged = true;
+        if (!task.createdBy && ownerName) {
+          task.createdBy = ownerName;
+          tasksChanged = true;
+        }
         cleaned.push(task);
       }
       if (cleaned.length !== deal.tasks.length) tasksChanged = true;
@@ -3168,6 +3199,8 @@ function normalizeTask(task) {
     completedAt: task.completedAt ?? null,
     createdAt: Number(task.createdAt) || Date.now(),
     updatedAt: task.updatedAt == null ? null : Number(task.updatedAt),
+    createdBy: String(task.createdBy || "").trim(),
+    updatedBy: String(task.updatedBy || "").trim(),
   };
 }
 
@@ -3209,18 +3242,21 @@ function taskWasEdited(task) {
 
 function updateActivityNoteTime(note, timeEl) {
   timeEl.dateTime = new Date(note.createdAt).toISOString();
-  timeEl.textContent = formatNoteTimestamp(note.createdAt);
+  let text = formatNoteTimestamp(note.createdAt) + formatActorStamp(note.createdBy);
   if (noteWasEdited(note)) {
-    timeEl.textContent += ` · edited ${formatNoteTimestamp(note.updatedAt)}`;
+    text += ` · edited ${formatNoteTimestamp(note.updatedAt)}${formatActorStamp(note.updatedBy || note.createdBy)}`;
   }
+  timeEl.textContent = text;
 }
 
 function updateDealTaskMeta(task, metaEl) {
   const dueLabel = task.dueAt != null ? formatTaskDueDate(task.dueAt) : "No date";
-  let text = dueLabel;
+  let text = dueLabel + formatActorStamp(task.createdBy);
   if (task.done) text += " · completed";
   else if (isTaskOverdue(task)) text += " · overdue";
-  if (taskWasEdited(task)) text += ` · edited ${formatNoteTimestamp(task.updatedAt)}`;
+  if (taskWasEdited(task)) {
+    text += ` · edited ${formatNoteTimestamp(task.updatedAt)}${formatActorStamp(task.updatedBy || task.createdBy)}`;
+  }
   metaEl.textContent = text;
 }
 
@@ -3271,6 +3307,7 @@ function renderActivityNotes() {
       note.text = textarea.value;
       if (textarea.value !== initialText) {
         note.updatedAt = Date.now();
+        note.updatedBy = stampCurrentUser(note.createdBy);
       }
       updateActivityNoteTime(note, time);
       resizeActivityNote(textarea);
@@ -3282,6 +3319,7 @@ function renderActivityNotes() {
     textarea.addEventListener("blur", () => {
       if (textarea.value !== initialText && !noteWasEdited(note)) {
         note.updatedAt = Date.now();
+        note.updatedBy = stampCurrentUser(note.createdBy);
         updateActivityNoteTime(note, time);
       }
       resizeActivityNote(textarea);
@@ -3305,6 +3343,8 @@ function addActivityNote() {
     text,
     createdAt: Date.now(),
     updatedAt: null,
+    createdBy: stampCurrentUser(),
+    updatedBy: "",
   });
   newNoteInput.value = "";
   renderActivityNotes();
@@ -3346,6 +3386,7 @@ function renderDealTasks() {
       task.done = !task.done;
       task.completedAt = task.done ? Date.now() : null;
       task.updatedAt = Date.now();
+      task.updatedBy = stampCurrentUser(task.createdBy);
       renderDealTasks();
     });
 
@@ -3380,12 +3421,16 @@ function renderDealTasks() {
 
     nameInput.addEventListener("input", () => {
       task.text = nameInput.value;
-      if (nameInput.value !== initialText) task.updatedAt = Date.now();
+      if (nameInput.value !== initialText) {
+        task.updatedAt = Date.now();
+        task.updatedBy = stampCurrentUser(task.createdBy);
+      }
       updateDealTaskMeta(task, meta);
     });
     nameInput.addEventListener("blur", () => {
       if (nameInput.value !== initialText && !taskWasEdited(task)) {
         task.updatedAt = Date.now();
+        task.updatedBy = stampCurrentUser(task.createdBy);
         updateDealTaskMeta(task, meta);
       }
     });
@@ -3398,7 +3443,10 @@ function renderDealTasks() {
         return;
       }
       task.dueAt = nextDue;
-      if (dueInput.value !== initialDue) task.updatedAt = Date.now();
+      if (dueInput.value !== initialDue) {
+        task.updatedAt = Date.now();
+        task.updatedBy = stampCurrentUser(task.createdBy);
+      }
       card.classList.toggle("is-overdue", isTaskOverdue(task));
       updateDealTaskMeta(task, meta);
       // Close the native date picker immediately after a choice.
@@ -3433,6 +3481,8 @@ function addDealTask() {
     completedAt: null,
     createdAt: Date.now(),
     updatedAt: null,
+    createdBy: stampCurrentUser(),
+    updatedBy: "",
   });
   newTaskNameInput.value = "";
   newTaskDueInput.value = "";
@@ -3473,6 +3523,7 @@ function setDealTaskDone(dealId, taskId, done) {
   task.done = done;
   task.completedAt = done ? Date.now() : null;
   task.updatedAt = Date.now();
+  task.updatedBy = stampCurrentUser(task.createdBy);
   saveDeals(dealId);
   render();
 }
@@ -4111,9 +4162,13 @@ function renderTaskCard(deal, task) {
   const meta = document.createElement("p");
   meta.className = "task-card-meta";
   const bits = [formatTaskDueDate(task.dueAt)];
-  if (deal.owner) bits.push(deal.owner);
+  if (task.createdBy) bits.push(`by ${task.createdBy}`);
+  if (deal.owner && deal.owner !== task.createdBy) bits.push(deal.owner);
   if (task.done) bits.push("Completed");
   else if (isTaskOverdue(task)) bits.push("Overdue");
+  if (taskWasEdited(task)) {
+    bits.push(`edited ${formatNoteTimestamp(task.updatedAt)}${formatActorStamp(task.updatedBy || task.createdBy)}`);
+  }
   meta.textContent = bits.join(" · ");
 
   body.append(name, company, meta);
@@ -4414,11 +4469,18 @@ function saveDealFromForm() {
         text: note.text.trim(),
         createdAt: note.createdAt,
         updatedAt: noteWasEdited(note) ? note.updatedAt : note.createdAt,
+        createdBy: String(note.createdBy || "").trim(),
+        updatedBy: noteWasEdited(note)
+          ? String(note.updatedBy || stampCurrentUser(note.createdBy)).trim()
+          : String(note.createdBy || "").trim(),
       }))
       .filter((note) => note.text),
     tasks: serializeModalTasks().map((task) => ({
       ...task,
       updatedAt: taskWasEdited(task) ? task.updatedAt : task.createdAt,
+      updatedBy: taskWasEdited(task)
+        ? String(task.updatedBy || stampCurrentUser(task.createdBy)).trim()
+        : String(task.createdBy || "").trim(),
     })),
   };
 
@@ -5120,6 +5182,8 @@ async function runImport() {
         text: row.values.brief,
         createdAt: createdAt + 1,
         updatedAt: createdAt + 1,
+        createdBy: stampCurrentUser(row.values.owner),
+        updatedBy: stampCurrentUser(row.values.owner),
       });
     }
     return {
