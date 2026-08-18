@@ -2411,12 +2411,14 @@ body.is-card-dragging .card {
   position: absolute;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   z-index: 3;
   max-width: none;
 }
 
 .tasks-pipeline-day-offset {
+  position: absolute;
+  right: 100%;
+  margin-right: 4px;
   flex-shrink: 0;
   font-family: var(--font-sans);
   font-size: 10px;

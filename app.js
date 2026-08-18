@@ -3939,9 +3939,9 @@ function formatTaskDayOffset(dueAt) {
 /** Estimate how far a fit-content task bar extends in timeline ms. */
 function estimateTaskBarWidthMs(entry, span, rowWidthPx) {
   const labelLen = Math.max(1, truncateTaskPipelineLabel(entry.task.text).length);
-  const offsetLen = formatTaskDayOffset(entry.task.dueAt).length;
-  // Rough match to CSS: chars + padding + day-offset badge, against the visible rows width.
-  const approxPx = labelLen * 8.5 + offsetLen * 6.5 + 52;
+  // Rough match to CSS: chars + bar padding, against the visible rows width.
+  // Day-offset sits outside the bubble and does not affect bar width.
+  const approxPx = labelLen * 8.5 + 44;
   const widthMs = (approxPx / Math.max(rowWidthPx, 1)) * span;
   const gapMs = (8 / Math.max(rowWidthPx, 1)) * span; // small breathing room
   return Math.max(MS_DAY, widthMs) + gapMs;
