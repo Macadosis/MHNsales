@@ -53,6 +53,8 @@ const tasksPipelineState = {
 };
 const TASKS_PIPELINE_LOOKBACK_DAYS = 7;
 const TASKS_PIPELINE_LABEL_MAX = 20;
+/** Skip month names when only a leftover sliver is on-screen (avoids overlapping the next month). */
+const TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS = 10;
 
 const pipelineState = {
   periodMonths: 4,
@@ -739,6 +741,7 @@ async function refreshDealsFromRemote() {
 }
 
 const DEAL_CREATION_NOTE_TEXT = "Deal card created";
+const TASK_COMPLETED_NOTE_KIND = "task-completed";
 
 function makeDealCreationNote(timestamp, createdBy) {
   const by = String(createdBy || getCurrentUserName() || "").trim();
@@ -754,6 +757,32 @@ function makeDealCreationNote(timestamp, createdBy) {
 
 function isDealCreationNote(note) {
   return (note?.text || "").trim() === DEAL_CREATION_NOTE_TEXT;
+}
+
+function makeTaskCompletedNote(task, timestamp = Date.now()) {
+  const name = (task?.text || "").trim() || "Untitled task";
+  const by = stampCurrentUser();
+  return {
+    id: crypto.randomUUID(),
+    kind: TASK_COMPLETED_NOTE_KIND,
+    text: `Completed task: ${name}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    createdBy: by,
+    updatedBy: by,
+  };
+}
+
+function isTaskCompletedNote(note) {
+  return note?.kind === TASK_COMPLETED_NOTE_KIND
+    || /^\s*Completed task:/i.test(note?.text || "");
+}
+
+function appendTaskCompletedNote(notes, task, timestamp = Date.now()) {
+  if (!Array.isArray(notes)) return null;
+  const note = makeTaskCompletedNote(task, timestamp);
+  notes.push(note);
+  return note;
 }
 
 function migrateDeals({ persist = true } = {}) {
@@ -3430,6 +3459,18 @@ function renderActivityNotes() {
 
     const time = document.createElement("time");
     time.className = "activity-note-time";
+    updateActivityNoteTime(note, time);
+
+    const isSystem = isDealCreationNote(note) || isTaskCompletedNote(note);
+    if (isSystem) {
+      card.classList.add("is-system");
+      const body = document.createElement("p");
+      body.className = "activity-note-text";
+      body.textContent = note.text;
+      card.append(time, body);
+      activityNotesEl.appendChild(card);
+      continue;
+    }
 
     const textarea = document.createElement("textarea");
     textarea.className = "note-textarea";
@@ -3439,7 +3480,6 @@ function renderActivityNotes() {
     textarea.setAttribute("aria-label", "Note text");
 
     const initialText = note.text;
-    updateActivityNoteTime(note, time);
 
     textarea.addEventListener("input", () => {
       note.text = textarea.value;
@@ -3521,10 +3561,12 @@ function renderDealTasks() {
     completeBtn.setAttribute("aria-label", task.done ? "Mark task incomplete" : "Complete task");
     completeBtn.disabled = modalReadOnly;
     completeBtn.addEventListener("click", () => {
+      const completing = !task.done;
       task.done = !task.done;
       task.completedAt = task.done ? Date.now() : null;
       task.updatedAt = Date.now();
       task.updatedBy = stampCurrentUser(task.createdBy);
+      if (completing) appendTaskCompletedNote(modalNotes, task, task.completedAt);
       renderDealTasks();
     });
 
@@ -3662,6 +3704,11 @@ function setDealTaskDone(dealId, taskId, done) {
   task.completedAt = done ? Date.now() : null;
   task.updatedAt = Date.now();
   task.updatedBy = stampCurrentUser(task.createdBy);
+  if (done) {
+    if (!Array.isArray(deal.notes)) deal.notes = [];
+    const note = appendTaskCompletedNote(deal.notes, task, task.completedAt);
+    if (editingId === dealId && note) modalNotes.push({ ...note });
+  }
   saveDeals(dealId);
   render();
 }
@@ -3921,11 +3968,16 @@ function truncateTaskPipelineLabel(text) {
   return `${value.slice(0, TASKS_PIPELINE_LABEL_MAX)}...`;
 }
 
-/** Days from today to the task due date: +2 future, 0 today, -3 past. */
-function formatTaskDayOffset(dueAt) {
+/** Days from due date to today: +2 overdue, 0 today, -3 upcoming. */
+function getTaskDayOffset(dueAt) {
   const today = startOfDay(new Date()).getTime();
   const due = startOfDay(new Date(dueAt)).getTime();
-  const days = Math.round((due - today) / MS_DAY);
+  return Math.round((today - due) / MS_DAY);
+}
+
+function formatTaskDayOffset(dueAt) {
+  const days = getTaskDayOffset(dueAt);
+  if (days === 0) return "";
   if (days > 0) return `+${days}`;
   return String(days);
 }
@@ -4133,22 +4185,27 @@ function renderTasksPipeline(entries) {
     const count = getMonthTaskCount(entries, monthStart, monthEnd);
     const left = ((visibleStart - periodStart) / span) * 100;
     const width = ((visibleEnd - visibleStart) / span) * 100;
+    const visibleDays = (visibleEnd - visibleStart) / MS_DAY;
+    const showMonthLabel = visibleDays >= TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS;
 
     const tick = document.createElement("div");
     tick.className = "tasks-pipeline-tick";
     tick.style.left = `${left}%`;
     tick.style.width = `${width}%`;
 
-    const label = document.createElement("span");
-    label.className = "tasks-pipeline-tick-label";
-    label.textContent = formatMonthLabel(monthStart);
+    if (showMonthLabel) {
+      const label = document.createElement("span");
+      label.className = "tasks-pipeline-tick-label";
+      label.textContent = formatMonthLabel(monthStart);
 
-    const countEl = document.createElement("span");
-    countEl.className = "tasks-pipeline-tick-count";
-    countEl.title = `${count} task${count === 1 ? "" : "s"} due in ${formatMonthYear(monthStart)}`;
-    countEl.textContent = count === 0 ? "—" : `${count} task${count === 1 ? "" : "s"}`;
+      const countEl = document.createElement("span");
+      countEl.className = "tasks-pipeline-tick-count";
+      countEl.title = `${count} task${count === 1 ? "" : "s"} due in ${formatMonthYear(monthStart)}`;
+      countEl.textContent = count === 0 ? "—" : `${count} task${count === 1 ? "" : "s"}`;
 
-    tick.append(label, countEl);
+      tick.append(label, countEl);
+    }
+
     monthsRow.appendChild(tick);
   }
 
@@ -4226,9 +4283,15 @@ function renderTasksPipeline(entries) {
     item.style.left = `${left}%`;
     item.style.top = `${entry._pipelineRow * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
 
-    const dayOffset = document.createElement("span");
-    dayOffset.className = "tasks-pipeline-day-offset";
-    dayOffset.textContent = formatTaskDayOffset(task.dueAt);
+    const dayOffsetDays = getTaskDayOffset(task.dueAt);
+    const dayOffsetLabel = formatTaskDayOffset(task.dueAt);
+    if (dayOffsetLabel) {
+      const dayOffset = document.createElement("span");
+      dayOffset.className = "tasks-pipeline-day-offset";
+      if (dayOffsetDays > 0) dayOffset.classList.add("is-overdue");
+      dayOffset.textContent = dayOffsetLabel;
+      item.append(dayOffset);
+    }
 
     const bar = document.createElement("button");
     bar.type = "button";
@@ -4259,7 +4322,7 @@ function renderTasksPipeline(entries) {
       openModal({ deal, initialPanel: "tasks", focusTaskId: task.id });
     });
 
-    item.append(dayOffset, bar);
+    item.append(bar);
     tasksPipelineRowsEl.appendChild(item);
   }
 
@@ -4612,6 +4675,7 @@ function saveDealFromForm() {
         updatedBy: noteWasEdited(note)
           ? String(note.updatedBy || stampCurrentUser(note.createdBy)).trim()
           : String(note.createdBy || "").trim(),
+        ...(note.kind ? { kind: note.kind } : {}),
       }))
       .filter((note) => note.text),
     tasks: serializeModalTasks().map((task) => ({
