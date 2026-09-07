@@ -55,6 +55,8 @@ const TASKS_PIPELINE_LOOKBACK_DAYS = 7;
 const TASKS_PIPELINE_LABEL_MAX = 20;
 /** Skip month names when only a leftover sliver is on-screen (avoids overlapping the next month). */
 const TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS = 10;
+/** Same-company tasks farther apart than this start a new packed cluster. */
+const TASKS_PIPELINE_COMPANY_CLUSTER_GAP_DAYS = 7;
 
 const pipelineState = {
   periodMonths: 4,
@@ -3982,9 +3984,22 @@ function formatTaskDayOffset(dueAt) {
   return String(days);
 }
 
+function taskPipelineCompanyKey(entry) {
+  return (entry?.deal?.company || "").trim().toLowerCase();
+}
+
+function taskPipelineCompanyLabel(deal) {
+  const name = (deal?.company || "").trim();
+  return `(${name || "Untitled deal"})`;
+}
+
 /** Estimate how far a fit-content task bar extends in timeline ms. */
 function estimateTaskBarWidthMs(entry, span, rowWidthPx) {
-  const labelLen = Math.max(1, truncateTaskPipelineLabel(entry.task.text).length);
+  const labelLen = Math.max(
+    1,
+    truncateTaskPipelineLabel(entry.task.text).length,
+    taskPipelineCompanyLabel(entry.deal).length
+  );
   // Rough match to CSS: chars + bar padding, against the visible rows width.
   // Day-offset sits outside the bubble and does not affect bar width.
   const approxPx = labelLen * 8.5 + 44;
@@ -3993,27 +4008,120 @@ function estimateTaskBarWidthMs(entry, span, rowWidthPx) {
   return Math.max(MS_DAY, widthMs) + gapMs;
 }
 
-/**
- * Pack tasks into rows using each bar's visual footprint (not just due date),
- * so fit-content bubbles don't overlap on the same row.
- */
-function assignTaskPipelineRows(entries, span, rowWidthPx = 720) {
-  const sorted = [...entries].sort((a, b) => a.task.dueAt - b.task.dueAt);
+function packIntervalsFirstFit(intervals) {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start || a.end - b.end);
   const rowEnds = [];
-
-  for (const entry of sorted) {
-    const start = entry.task.dueAt;
-    const end = start + estimateTaskBarWidthMs(entry, span, rowWidthPx);
+  for (const item of sorted) {
     let row = 0;
-    while (row < rowEnds.length && rowEnds[row] > start) row += 1;
+    while (row < rowEnds.length && rowEnds[row] > item.start) row += 1;
     if (row === rowEnds.length) rowEnds.push(0);
-    rowEnds[row] = end;
-    entry._pipelineRow = row;
-    entry._pipelineStart = start;
-    entry._pipelineEnd = end;
+    rowEnds[row] = item.end;
+    item.relRow = row;
+  }
+  return rowEnds.length;
+}
+
+function lowestClusterBaseRow(members, placed) {
+  let base = 0;
+  while (
+    members.some((member) => {
+      const row = base + member.relRow;
+      return placed.some(
+        (entry) => entry.row === row && entry.start < member.end && member.start < entry.end
+      );
+    })
+  ) {
+    base += 1;
+  }
+  return base;
+}
+
+function clusterTaskPipelineByCompany(items, getDueAt, getCompany) {
+  const gapMs = TASKS_PIPELINE_COMPANY_CLUSTER_GAP_DAYS * MS_DAY;
+  const byCompany = new Map();
+  for (const item of items) {
+    const company = getCompany(item);
+    if (!byCompany.has(company)) byCompany.set(company, []);
+    byCompany.get(company).push(item);
   }
 
-  return rowEnds.length;
+  const clusters = [];
+  for (const [company, group] of byCompany) {
+    const sorted = [...group].sort((a, b) => getDueAt(a) - getDueAt(b));
+    let current = [];
+    for (const item of sorted) {
+      if (current.length) {
+        const prevDue = getDueAt(current[current.length - 1]);
+        if (getDueAt(item) - prevDue > gapMs) {
+          clusters.push({ company, items: current });
+          current = [];
+        }
+      }
+      current.push(item);
+    }
+    if (current.length) clusters.push({ company, items: current });
+  }
+
+  clusters.sort((a, b) => {
+    const aStart = Math.min(...a.items.map(getDueAt));
+    const bStart = Math.min(...b.items.map(getDueAt));
+    if (aStart !== bStart) return aStart - bStart;
+    return a.company.localeCompare(b.company);
+  });
+  return clusters;
+}
+
+function applyTaskPipelineClusterPacking(clusters, measure) {
+  const placed = [];
+  let maxRow = -1;
+
+  for (const cluster of clusters) {
+    const members = cluster.items.map((item) => {
+      const { start, end } = measure(item);
+      return { item, start, end };
+    });
+    packIntervalsFirstFit(members);
+    const base = lowestClusterBaseRow(members, placed);
+    for (const member of members) {
+      const row = base + member.relRow;
+      placed.push({ row, start: member.start, end: member.end });
+      if (row > maxRow) maxRow = row;
+      member.row = row;
+    }
+    cluster.members = members;
+  }
+
+  return maxRow + 1;
+}
+
+/**
+ * Pack tasks into rows by company cluster. Nearby same-company tasks stay stacked
+ * together; a gap longer than a week starts a new cluster so empty rows collapse.
+ */
+function assignTaskPipelineRows(entries, span, rowWidthPx = 720) {
+  const clusters = clusterTaskPipelineByCompany(
+    entries,
+    (entry) => entry.task.dueAt,
+    taskPipelineCompanyKey
+  );
+  applyTaskPipelineClusterPacking(clusters, (entry) => {
+    const start = entry.task.dueAt;
+    return { start, end: start + estimateTaskBarWidthMs(entry, span, rowWidthPx) };
+  });
+
+  for (const cluster of clusters) {
+    for (const member of cluster.members) {
+      member.item._pipelineRow = member.row;
+      member.item._pipelineStart = member.start;
+      member.item._pipelineEnd = member.end;
+    }
+  }
+
+  return clusters.reduce(
+    (max, cluster) =>
+      Math.max(max, ...cluster.members.map((member) => member.row + 1)),
+    0
+  );
 }
 
 /** After items are in the DOM, re-pack from measured widths so nothing overlaps. */
@@ -4022,36 +4130,28 @@ function relayoutTaskPipelineBars() {
   if (!items.length) return;
 
   const rowWidthPx = Math.max(tasksPipelineRowsEl.clientWidth || 720, 1);
-  const placed = []; // { row, leftPx, rightPx }
-
-  // Sort left-to-right so earlier dues claim upper rows first.
-  items.sort((a, b) => (parseFloat(a.style.left) || 0) - (parseFloat(b.style.left) || 0));
-
-  for (const item of items) {
+  const clusters = clusterTaskPipelineByCompany(
+    items,
+    (item) => Number(item.dataset.dueAt) || 0,
+    (item) => item.dataset.company || ""
+  );
+  const rowCount = applyTaskPipelineClusterPacking(clusters, (item) => {
     const leftPct = parseFloat(item.style.left) || 0;
     const leftPx = (leftPct / 100) * rowWidthPx;
     const widthPx = Math.max(item.offsetWidth, 1);
-    const rightPx = leftPx + widthPx + 8; // 8px gap
+    return { start: leftPx, end: leftPx + widthPx + 8 };
+  });
 
-    let row = 0;
-    while (
-      placed.some(
-        (entry) => entry.row === row && entry.leftPx < rightPx && leftPx < entry.rightPx
-      )
-    ) {
-      row += 1;
+  for (const cluster of clusters) {
+    for (const member of cluster.members) {
+      member.item.style.top = `${member.row * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
+      member.item.dataset.pipelineRow = String(member.row);
     }
-
-    placed.push({ row, leftPx, rightPx });
-    item.style.top = `${row * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
-    item.dataset.pipelineRow = String(row);
   }
 
-  const rowCount = placed.reduce((max, entry) => Math.max(max, entry.row + 1), 1);
   const finalRows = Math.max(rowCount, 2);
   tasksPipelineRowsEl.style.height = `${finalRows * TASKS_PIPELINE_ROW_HEIGHT}px`;
 
-  // Rebuild row dividers to match the final packed height.
   tasksPipelineRowsEl.querySelectorAll(".tasks-pipeline-row-divider").forEach((el) => el.remove());
   for (let row = 1; row < finalRows; row += 1) {
     const divider = document.createElement("div");
@@ -4280,6 +4380,8 @@ function renderTasksPipeline(entries) {
 
     const item = document.createElement("div");
     item.className = "tasks-pipeline-item";
+    item.dataset.company = taskPipelineCompanyKey(entry);
+    item.dataset.dueAt = String(task.dueAt);
     item.style.left = `${left}%`;
     item.style.top = `${entry._pipelineRow * TASKS_PIPELINE_ROW_HEIGHT + TASKS_PIPELINE_BAR_TOP}px`;
 
@@ -4310,7 +4412,11 @@ function renderTasksPipeline(entries) {
     label.className = "tasks-pipeline-bar-label";
     label.textContent = truncateTaskPipelineLabel(task.text);
 
-    text.append(label);
+    const company = document.createElement("span");
+    company.className = "tasks-pipeline-bar-company";
+    company.textContent = taskPipelineCompanyLabel(deal);
+
+    text.append(label, company);
     bar.append(text);
     bar.addEventListener("mouseenter", () => showTasksPipelineTooltip(bar, deal, task));
     bar.addEventListener("mousemove", () => showTasksPipelineTooltip(bar, deal, task));

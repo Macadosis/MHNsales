@@ -2482,10 +2482,12 @@ body.is-card-dragging .card {
 
 .tasks-pipeline-bar-text {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1px;
   box-sizing: border-box;
   height: 100%;
-  white-space: nowrap;
   width: max-content;
   max-width: 23ch;
   min-width: 0;
@@ -2496,7 +2498,20 @@ body.is-card-dragging .card {
   font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.1;
   color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  max-width: 23ch;
+}
+
+.tasks-pipeline-bar-company {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink-soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: clip;
@@ -2506,6 +2521,10 @@ body.is-card-dragging .card {
 .tasks-pipeline-bar.is-done .tasks-pipeline-bar-label {
   text-decoration: line-through;
   color: var(--ink-soft);
+}
+
+.tasks-pipeline-bar.is-done .tasks-pipeline-bar-company {
+  color: var(--ink-faint);
 }
 
 .tasks-pipeline-tooltip {
