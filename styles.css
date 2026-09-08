@@ -25,6 +25,7 @@
   --tasks-pipe-overdue-soft: #ebe9e3;
   /* Shared height for Owner/Industry/Tool, Search, Clear filters, Show completed */
   --toolbar-control-height: 36px;
+  --toolbar-v-pad: 4px;
   /* Soft pastels for card chips (warm ivory-friendly) */
   --chip-value: #3d7a52;           /* calm sage — sales value */
   --chip-industry-bg: #e8f0ea;
@@ -510,7 +511,7 @@ main {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 28px 0;
+  padding: var(--toolbar-v-pad) 28px;
   min-width: 0;
 }
 
@@ -524,14 +525,13 @@ main {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   overscroll-behavior-y: none;
-  scrollbar-width: thin;
+  scrollbar-width: none;
   min-width: 0;
   width: 100%;
-  padding-bottom: 2px;
 }
 
 .toolbar-scroll::-webkit-scrollbar {
-  height: 6px;
+  display: none;
 }
 
 .toolbar-scroll.is-menu-open,
@@ -808,7 +808,7 @@ main {
   display: grid;
   grid-template-columns: repeat(5, minmax(230px, 1fr));
   gap: 16px;
-  padding: 16px 28px 28px;
+  padding: 0 28px 28px;
   overflow-x: auto;
   overflow-y: hidden; /* stop iOS vertical rubber-band on the board */
   overscroll-behavior: none;
@@ -1357,7 +1357,7 @@ body.is-card-dragging .card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 28px 0;
+  padding: var(--toolbar-v-pad) 28px;
   flex-wrap: nowrap;
   min-width: 0;
 }
@@ -1428,7 +1428,7 @@ body.is-card-dragging .card {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 16px 28px 28px;
+  padding: 0 28px 28px;
   overflow: auto;
 }
 
@@ -1705,7 +1705,7 @@ body.is-card-dragging .card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 28px 0;
+  padding: var(--toolbar-v-pad) 28px;
   min-width: 0;
   flex-shrink: 0;
 }
@@ -1713,7 +1713,7 @@ body.is-card-dragging .card {
 .dashboard-body {
   flex: 1;
   min-height: 0;
-  padding: 16px 28px 28px;
+  padding: 0 28px 28px;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: none;
@@ -1976,7 +1976,7 @@ body.is-card-dragging .card {
 @media (max-width: 720px) {
   .dashboard-body {
     /* Bottom padding clears the floating New deal / Import buttons */
-    padding: 12px 16px 96px;
+    padding: 0 16px 96px;
   }
 
   .dashboard-grid,
@@ -2172,10 +2172,17 @@ body.is-card-dragging .card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 28px 0;
+  padding: var(--toolbar-v-pad) 28px;
   min-width: 0;
   flex-shrink: 0;
   flex-wrap: nowrap;
+  background: var(--bg);
+  position: relative;
+  z-index: 1;
+}
+
+#view-tasks.is-pipeline .tasks-toolbar {
+  padding-bottom: 0;
 }
 
 .tasks-toolbar .toolbar-scroll {
@@ -2241,11 +2248,11 @@ body.is-card-dragging .card {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 16px 28px 28px;
+  padding: var(--toolbar-v-pad) 28px 28px;
   overflow: auto;
   background:
-    linear-gradient(180deg, rgba(228, 237, 244, 0.55) 0%, transparent 120px),
-    var(--bg);
+    linear-gradient(180deg, rgba(228, 237, 244, 0.55) 0%, transparent 120px) content-box,
+    var(--bg) padding-box;
 }
 
 .tasks-pipeline-chart[hidden] {
@@ -2639,7 +2646,7 @@ body.is-card-dragging .card {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   gap: 24px;
-  padding: 16px 28px 28px;
+  padding: 0 28px 28px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -4035,7 +4042,7 @@ body.is-card-dragging .card {
   .pipeline-toolbar,
   .tasks-toolbar,
   .dashboard-toolbar {
-    padding: 12px 16px 0;
+    padding: var(--toolbar-v-pad) 16px;
   }
 
   #clearFiltersBtn,
@@ -4088,7 +4095,7 @@ body.is-card-dragging .card {
   }
 
   .board {
-    padding: 12px 16px 16px;
+    padding: 0 16px 16px;
     min-height: 0;
   }
 
