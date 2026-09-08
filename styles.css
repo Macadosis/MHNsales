@@ -25,7 +25,9 @@
   --tasks-pipe-overdue-soft: #ebe9e3;
   /* Shared height for Owner/Industry/Tool, Search, Clear filters, Show completed */
   --toolbar-control-height: 36px;
-  --toolbar-v-pad: 16px;
+  /* Column gutter — also the vertical gap between page, nav, banner, filters, and board */
+  --board-gap: 16px;
+  --toolbar-v-pad: var(--board-gap);
   /* Soft pastels for card chips (warm ivory-friendly) */
   --chip-value: #3d7a52;           /* calm sage — sales value */
   --chip-industry-bg: #e8f0ea;
@@ -98,6 +100,7 @@ body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  gap: var(--board-gap);
 }
 
 .app-shell[hidden],
@@ -236,9 +239,8 @@ body {
   display: flex;
   align-items: center;
   gap: 32px;
-  padding: 14px 28px;
+  padding: var(--board-gap) 28px 0;
   background: var(--bg);
-  border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -511,7 +513,7 @@ main {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: var(--toolbar-v-pad) 28px;
+  padding: 0 28px var(--board-gap);
   min-width: 0;
 }
 
@@ -807,7 +809,7 @@ main {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(5, minmax(230px, 1fr));
-  gap: 16px;
+  gap: var(--board-gap);
   padding: 0 28px 28px;
   overflow-x: auto;
   overflow-y: hidden; /* stop iOS vertical rubber-band on the board */
@@ -1357,7 +1359,7 @@ body.is-card-dragging .card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: var(--toolbar-v-pad) 28px;
+  padding: 0 28px var(--board-gap);
   flex-wrap: nowrap;
   min-width: 0;
 }
@@ -1705,7 +1707,7 @@ body.is-card-dragging .card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: var(--toolbar-v-pad) 28px;
+  padding: 0 28px var(--board-gap);
   min-width: 0;
   flex-shrink: 0;
 }
@@ -2172,7 +2174,7 @@ body.is-card-dragging .card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: var(--toolbar-v-pad) 28px;
+  padding: 0 28px var(--board-gap);
   min-width: 0;
   flex-shrink: 0;
   flex-wrap: nowrap;
@@ -3799,7 +3801,7 @@ body.is-card-dragging .card {
 @media (max-width: 720px) {
   .topbar {
     gap: 8px;
-    padding: 12px 10px 12px 16px;
+    padding: var(--board-gap) 16px 0;
   }
 
   .brand-name {
@@ -4038,7 +4040,7 @@ body.is-card-dragging .card {
   .pipeline-toolbar,
   .tasks-toolbar,
   .dashboard-toolbar {
-    padding: var(--toolbar-v-pad) 16px;
+    padding: 0 16px var(--board-gap);
   }
 
   #clearFiltersBtn,
@@ -4133,6 +4135,7 @@ body.is-card-dragging .card {
 }
 
 .cloud-readonly-banner {
+  flex-shrink: 0;
   background: #e4eef5;
   color: #3f6a82;
   border-bottom: 1px solid #bfcfda;
