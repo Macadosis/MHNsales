@@ -4061,7 +4061,6 @@ function renderTasksView() {
   });
 
   const isPipeline = tasksViewMode === "pipeline";
-  document.getElementById("view-tasks")?.classList.toggle("is-pipeline", isPipeline);
   if (tasksListLayout) tasksListLayout.hidden = isPipeline;
   if (tasksPipelineLayout) tasksPipelineLayout.hidden = !isPipeline;
   if (tasksPipelinePeriod) tasksPipelinePeriod.hidden = !isPipeline;

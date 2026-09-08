@@ -25,7 +25,7 @@
   --tasks-pipe-overdue-soft: #ebe9e3;
   /* Shared height for Owner/Industry/Tool, Search, Clear filters, Show completed */
   --toolbar-control-height: 36px;
-  --toolbar-v-pad: 4px;
+  --toolbar-v-pad: 16px;
   /* Soft pastels for card chips (warm ivory-friendly) */
   --chip-value: #3d7a52;           /* calm sage — sales value */
   --chip-industry-bg: #e8f0ea;
@@ -2181,10 +2181,6 @@ body.is-card-dragging .card {
   z-index: 1;
 }
 
-#view-tasks.is-pipeline .tasks-toolbar {
-  padding-bottom: 0;
-}
-
 .tasks-toolbar .toolbar-scroll {
   flex: 1;
 }
@@ -2248,11 +2244,11 @@ body.is-card-dragging .card {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: var(--toolbar-v-pad) 28px 28px;
+  padding: 0 28px 28px;
   overflow: auto;
   background:
-    linear-gradient(180deg, rgba(228, 237, 244, 0.55) 0%, transparent 120px) content-box,
-    var(--bg) padding-box;
+    linear-gradient(180deg, rgba(228, 237, 244, 0.55) 0%, transparent 120px),
+    var(--bg);
 }
 
 .tasks-pipeline-chart[hidden] {
