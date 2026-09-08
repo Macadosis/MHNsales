@@ -57,6 +57,7 @@ const TASKS_PIPELINE_LABEL_MAX = 20;
 const TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS = 10;
 /** Same-company tasks farther apart than this start a new packed cluster. */
 const TASKS_PIPELINE_COMPANY_CLUSTER_GAP_DAYS = 7;
+const TASKS_PIPELINE_COMPANY_TONES = ["sage", "lavender", "sky", "sand", "peach", "rose"];
 
 const pipelineState = {
   periodMonths: 4,
@@ -3993,6 +3994,43 @@ function taskPipelineCompanyLabel(deal) {
   return `(${name || "Untitled deal"})`;
 }
 
+function hashTaskPipelineCompanyKey(key) {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+/** Pastel tones for companies that have 2+ tasks on the current timeline. */
+function assignVisibleCompanyTones(entries) {
+  const counts = new Map();
+  for (const entry of entries) {
+    const key = taskPipelineCompanyKey(entry);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  const grouped = [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([key]) => key)
+    .sort();
+
+  const used = new Set();
+  const tones = new Map();
+  const paletteSize = TASKS_PIPELINE_COMPANY_TONES.length;
+  for (const company of grouped) {
+    let index = hashTaskPipelineCompanyKey(company) % paletteSize;
+    let hops = 0;
+    while (used.has(index) && hops < paletteSize) {
+      index = (index + 1) % paletteSize;
+      hops += 1;
+    }
+    used.add(index);
+    tones.set(company, TASKS_PIPELINE_COMPANY_TONES[index]);
+  }
+  return tones;
+}
+
 /** Estimate how far a fit-content task bar extends in timeline ms. */
 function estimateTaskBarWidthMs(entry, span, rowWidthPx) {
   const labelLen = Math.max(
@@ -4374,6 +4412,8 @@ function renderTasksPipeline(entries) {
     return;
   }
 
+  const companyTones = assignVisibleCompanyTones(visibleEntries);
+
   for (const entry of visibleEntries) {
     const { deal, task } = entry;
     const left = ((entry._pipelineStart - periodStart) / span) * 100;
@@ -4400,6 +4440,8 @@ function renderTasksPipeline(entries) {
     bar.className = "tasks-pipeline-bar";
     if (task.done) bar.classList.add("is-done");
     if (isTaskOverdue(task)) bar.classList.add("is-overdue");
+    const companyTone = companyTones.get(taskPipelineCompanyKey(entry));
+    if (companyTone) bar.dataset.companyTone = companyTone;
     bar.setAttribute(
       "aria-label",
       `${task.text}, ${deal.company || "Untitled deal"}, due ${formatTaskDueDate(task.dueAt)}`

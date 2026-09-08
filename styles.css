@@ -38,6 +38,13 @@
   --chip-impl-line: #bfcfda;
   --chip-owner-bg: #efe9df;
   --chip-owner-ink: #6b6358;
+  --chip-owner-line: #d4cbbd;
+  --chip-peach-bg: #f5e5dd;
+  --chip-peach-ink: #a86a52;
+  --chip-peach-line: #e8cfc4;
+  --chip-rose-bg: #f3e8e6;
+  --chip-rose-ink: #8a5e5a;
+  --chip-rose-line: #e0cdc9;
   /* Dashboard stage palette — cool → green funnel, red for failed, grey for dismissed */
   --stage-prospects: #9aa7b0;
   --stage-interested: #5a7a95;
@@ -2471,9 +2478,48 @@ body.is-card-dragging .card {
 }
 
 .tasks-pipeline-bar.is-overdue {
+  opacity: 0.78;
+}
+
+.tasks-pipeline-bar.is-overdue:not([data-company-tone]) {
   background: var(--tasks-pipe-overdue-soft);
   border-color: var(--tasks-pipe-overdue);
-  opacity: 0.78;
+}
+
+.tasks-pipeline-bar[data-company-tone="sage"] {
+  background: var(--chip-industry-bg);
+  border-color: var(--chip-industry-line);
+  border-left-color: var(--chip-industry-ink);
+}
+
+.tasks-pipeline-bar[data-company-tone="lavender"] {
+  background: var(--chip-tool-bg);
+  border-color: var(--chip-tool-line);
+  border-left-color: var(--chip-tool-ink);
+}
+
+.tasks-pipeline-bar[data-company-tone="sky"] {
+  background: var(--chip-impl-bg);
+  border-color: var(--chip-impl-line);
+  border-left-color: var(--chip-impl-ink);
+}
+
+.tasks-pipeline-bar[data-company-tone="sand"] {
+  background: var(--chip-owner-bg);
+  border-color: var(--chip-owner-line);
+  border-left-color: var(--chip-owner-ink);
+}
+
+.tasks-pipeline-bar[data-company-tone="peach"] {
+  background: var(--chip-peach-bg);
+  border-color: var(--chip-peach-line);
+  border-left-color: var(--chip-peach-ink);
+}
+
+.tasks-pipeline-bar[data-company-tone="rose"] {
+  background: var(--chip-rose-bg);
+  border-color: var(--chip-rose-line);
+  border-left-color: var(--chip-rose-ink);
 }
 
 .tasks-pipeline-bar.is-done {
