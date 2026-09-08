@@ -42,7 +42,9 @@ let modalPanel = "details";
 let syncingFromRemote = false;
 let appStarted = false;
 let showCompletedTasks = false;
-let tasksViewMode = "list"; // "list" | "pipeline"
+const taskTypeFilters = new Set();
+let newTaskType = "";
+let tasksViewMode = "pipeline"; // "list" | "pipeline"
 const tasksCalendarState = {
   monthStart: null,
   selectedDate: null,
@@ -58,6 +60,14 @@ const TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS = 10;
 /** Same-company tasks farther apart than this start a new packed cluster. */
 const TASKS_PIPELINE_COMPANY_CLUSTER_GAP_DAYS = 7;
 const TASKS_PIPELINE_COMPANY_TONES = ["sage", "lavender", "sky", "sand", "peach", "rose"];
+/** Space reserved beside a bubble for the day-offset so neighbors don’t crush it. */
+const TASKS_PIPELINE_OFFSET_RESERVE_PX = 22;
+const TASK_TYPES = [
+  { id: "call", label: "Call" },
+  { id: "meet", label: "Meet" },
+  { id: "ticket", label: "Ticket" },
+];
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 const pipelineState = {
   periodMonths: 4,
@@ -119,6 +129,8 @@ const modalPanelTasks = document.getElementById("modalPanelTasks");
 const dealTasksListEl = document.getElementById("dealTasksList");
 const newTaskNameInput = document.getElementById("newTaskNameInput");
 const newTaskDueInput = document.getElementById("newTaskDueInput");
+const newTaskTypePickerEl = document.getElementById("newTaskTypePicker");
+const taskTypeFilterEl = document.getElementById("taskTypeFilter");
 const tasksFiltersEl = document.getElementById("tasksFilters");
 const tasksClearFiltersBtn = document.getElementById("tasksClearFiltersBtn");
 const tasksListEl = document.getElementById("tasksList");
@@ -3356,6 +3368,166 @@ function isTaskOverdue(task, now = Date.now()) {
   return task.dueAt < startOfDay(new Date(now)).getTime();
 }
 
+function normalizeTaskType(value) {
+  const id = String(value || "").trim().toLowerCase();
+  return TASK_TYPES.some((entry) => entry.id === id) ? id : "";
+}
+
+function taskTypeLabel(type) {
+  const id = normalizeTaskType(type);
+  return TASK_TYPES.find((entry) => entry.id === id)?.label || "";
+}
+
+function taskTypeSortIndex(type) {
+  const id = normalizeTaskType(type);
+  const index = TASK_TYPES.findIndex((entry) => entry.id === id);
+  return index === -1 ? TASK_TYPES.length : index;
+}
+
+function createSvgEl(name, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+  return el;
+}
+
+function createTaskTypeIcon(type) {
+  const svg = createSvgEl("svg", {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    "aria-hidden": "true",
+  });
+  const stroke = {
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  };
+  const id = normalizeTaskType(type);
+  if (id === "call") {
+    svg.appendChild(
+      createSvgEl("path", {
+        ...stroke,
+        transform: "translate(0 1.7)",
+        d: "M8.1 4.6c.4-.8 1.4-1.1 2.2-.7l1.2.6c.6.3.9 1.1.6 1.8l-.4 1c-.2.4 0 .8.3 1.1l1.9 1.9c.3.3.7.5 1.1.3l1-.4c.7-.3 1.5 0 1.8.6l.6 1.2c.4.8.1 1.8-.7 2.2-1.4.7-4.1.3-7.3-2.9S7.4 6 8.1 4.6z",
+      })
+    );
+  } else if (id === "meet") {
+    svg.appendChild(createSvgEl("circle", { ...stroke, cx: "9", cy: "8", r: "3.1" }));
+    svg.appendChild(
+      createSvgEl("path", { ...stroke, d: "M4.2 19c.7-2.6 2.6-4 4.8-4s4.1 1.4 4.8 4" })
+    );
+    svg.appendChild(createSvgEl("circle", { ...stroke, cx: "16.6", cy: "8.4", r: "2.4" }));
+    svg.appendChild(
+      createSvgEl("path", { ...stroke, d: "M20.6 19c-.5-1.9-1.8-3-3.5-3.4" })
+    );
+  } else if (id === "ticket") {
+    svg.appendChild(
+      createSvgEl("path", {
+        ...stroke,
+        d: "M4 8.2h16v2.2c-1.3 0-2.2.8-2.2 2.1s.9 2.1 2.2 2.1v2.2H4v-2.2c1.3 0 2.2-.8 2.2-2.1S5.3 10.4 4 10.4V8.2z",
+      })
+    );
+    svg.appendChild(createSvgEl("path", { ...stroke, d: "M9.5 8.2v7.6" }));
+  }
+  return svg;
+}
+
+function createTaskTypeMark(type) {
+  const id = normalizeTaskType(type);
+  if (!id) return null;
+  const mark = document.createElement("span");
+  mark.className = "task-type-mark";
+  mark.dataset.taskType = id;
+  mark.title = taskTypeLabel(id);
+  mark.setAttribute("aria-hidden", "true");
+  mark.append(createTaskTypeIcon(id));
+  return mark;
+}
+
+function createTaskTypePicker({ selected = "", disabled = false, onChange } = {}) {
+  const picker = document.createElement("div");
+  picker.className = "task-type-picker";
+  picker.setAttribute("role", "radiogroup");
+  picker.setAttribute("aria-label", "Task type");
+
+  const selectType = (id) => {
+    picker.querySelectorAll(".task-type-btn").forEach((btn) => {
+      const on = btn.dataset.taskType === id;
+      btn.classList.toggle("is-selected", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    onChange?.(id);
+  };
+
+  for (const { id, label } of TASK_TYPES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "task-type-btn";
+    btn.dataset.taskType = id;
+    btn.disabled = disabled;
+    btn.setAttribute("aria-pressed", selected === id ? "true" : "false");
+    if (selected === id) btn.classList.add("is-selected");
+
+    const caption = document.createElement("span");
+    caption.className = "task-type-btn-label";
+    caption.textContent = label;
+
+    const glyph = document.createElement("span");
+    glyph.className = "task-type-glyph";
+    glyph.append(createTaskTypeIcon(id));
+
+    btn.append(caption, glyph);
+    btn.addEventListener("click", () => {
+      if (disabled) return;
+      selectType(id);
+    });
+    picker.append(btn);
+  }
+  return picker;
+}
+
+function mountComposerTaskTypePicker() {
+  if (!newTaskTypePickerEl) return;
+  newTaskTypePickerEl.innerHTML = "";
+  newTaskTypePickerEl.append(
+    createTaskTypePicker({
+      selected: newTaskType,
+      disabled: modalReadOnly,
+      onChange: (id) => {
+        newTaskType = id;
+      },
+    })
+  );
+}
+
+function renderTaskTypeFilter() {
+  if (!taskTypeFilterEl) return;
+  taskTypeFilterEl.innerHTML = "";
+  for (const { id, label } of TASK_TYPES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "task-type-filter-btn";
+    btn.dataset.taskType = id;
+    const pressed = taskTypeFilters.has(id);
+    btn.classList.toggle("is-active", pressed);
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    btn.setAttribute("aria-label", `Show ${label.toLowerCase()} tasks`);
+    btn.title = label;
+    const glyph = document.createElement("span");
+    glyph.className = "task-type-glyph";
+    glyph.append(createTaskTypeIcon(id));
+    btn.append(glyph);
+    btn.addEventListener("click", () => {
+      if (taskTypeFilters.has(id)) taskTypeFilters.delete(id);
+      else taskTypeFilters.add(id);
+      if (activeTab === "tasks") renderTasksView();
+      else renderTaskTypeFilter();
+    });
+    taskTypeFilterEl.append(btn);
+  }
+}
+
 function normalizeTask(task) {
   const dueRaw = task?.dueAt;
   const dueAt =
@@ -3366,6 +3538,7 @@ function normalizeTask(task) {
     id: task.id || crypto.randomUUID(),
     text: (task.text || "").trim(),
     dueAt: Number.isFinite(dueAt) ? dueAt : null,
+    type: normalizeTaskType(task.type),
     done: Boolean(task.done),
     completedAt: task.completedAt ?? null,
     createdAt: Number(task.createdAt) || Date.now(),
@@ -3587,6 +3760,9 @@ function renderDealTasks() {
     nameInput.setAttribute("form", "mhn-task-composer-unbound");
     const initialText = task.text || "";
 
+    const dueRow = document.createElement("div");
+    dueRow.className = "deal-task-due-row";
+
     const dueInput = document.createElement("input");
     dueInput.type = "date";
     dueInput.className = "deal-task-due";
@@ -3597,6 +3773,22 @@ function renderDealTasks() {
     dueInput.setAttribute("aria-label", "Task due date");
     dueInput.setAttribute("form", "mhn-task-composer-unbound");
     const initialDue = dueInput.value;
+
+    const typePicker = createTaskTypePicker({
+      selected: task.type,
+      disabled: modalReadOnly,
+      onChange: (id) => {
+        task.type = id;
+        task.updatedAt = Date.now();
+        task.updatedBy = stampCurrentUser(task.createdBy);
+        const existingMark = card.querySelector(".task-type-mark");
+        if (existingMark) existingMark.remove();
+        const nextMark = createTaskTypeMark(id);
+        if (nextMark) card.append(nextMark);
+      },
+    });
+
+    dueRow.append(dueInput, typePicker);
 
     const meta = document.createElement("p");
     meta.className = "deal-task-meta";
@@ -3636,9 +3828,11 @@ function renderDealTasks() {
       dueInput.blur();
     });
 
-    fields.append(nameInput, dueInput, meta);
+    fields.append(nameInput, dueRow, meta);
     top.append(completeBtn, fields);
     card.append(top);
+    const typeMark = createTaskTypeMark(task.type);
+    if (typeMark) card.append(typeMark);
     dealTasksListEl.appendChild(card);
   }
 }
@@ -3647,6 +3841,7 @@ function addDealTask() {
   if (modalReadOnly) return;
   const text = newTaskNameInput.value.trim();
   const dueAt = parseDateInput(newTaskDueInput.value);
+  const type = normalizeTaskType(newTaskType);
   if (!text) {
     newTaskNameInput.focus();
     return;
@@ -3655,11 +3850,16 @@ function addDealTask() {
     newTaskDueInput.focus();
     return;
   }
+  if (!type) {
+    newTaskTypePickerEl?.querySelector(".task-type-btn")?.focus();
+    return;
+  }
 
   modalTasks.push({
     id: crypto.randomUUID(),
     text,
     dueAt,
+    type,
     done: false,
     completedAt: null,
     createdAt: Date.now(),
@@ -3669,6 +3869,8 @@ function addDealTask() {
   });
   newTaskNameInput.value = "";
   newTaskDueInput.value = "";
+  newTaskType = "";
+  mountComposerTaskTypePicker();
   renderDealTasks();
   newTaskNameInput.focus();
 }
@@ -3681,11 +3883,17 @@ function getAllTaskEntries({ includeCompleted = showCompletedTasks } = {}) {
     for (const task of deal.tasks || []) {
       if (!task?.text || task.dueAt == null) continue;
       if (!includeCompleted && task.done) continue;
-      entries.push({ deal, task: normalizeTask(task) });
+      const normalized = normalizeTask(task);
+      if (taskTypeFilters.size && !taskTypeFilters.has(normalized.type)) continue;
+      entries.push({ deal, task: normalized });
     }
   }
   entries.sort((a, b) => {
     if (a.task.done !== b.task.done) return a.task.done ? 1 : -1;
+    if (taskTypeFilters.size) {
+      const typeCmp = taskTypeSortIndex(a.task.type) - taskTypeSortIndex(b.task.type);
+      if (typeCmp) return typeCmp;
+    }
     if (a.task.dueAt !== b.task.dueAt) return a.task.dueAt - b.task.dueAt;
     return (a.task.createdAt || 0) - (b.task.createdAt || 0);
   });
@@ -3824,6 +4032,7 @@ function renderTasksView() {
   tasksShowCompletedBtn.setAttribute("aria-pressed", showCompletedTasks ? "true" : "false");
   tasksShowCompletedBtn.textContent = showCompletedTasks ? "Hide completed" : "Show completed";
   tasksShowCompletedBtn.classList.toggle("is-active", showCompletedTasks);
+  renderTaskTypeFilter();
 
   document.querySelectorAll(".tasks-view-btn").forEach((btn) => {
     const active = btn.dataset.tasksView === tasksViewMode;
@@ -3862,9 +4071,11 @@ function renderTasksView() {
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "tasks-empty";
-    const filtersActive = hasActiveFilters() || searchQuery;
+    const filtersActive = hasActiveFilters() || searchQuery || taskTypeFilters.size;
     if (tasksCalendarState.selectedDate != null) {
       empty.textContent = "No tasks on this date.";
+    } else if (taskTypeFilters.size) {
+      empty.textContent = "No tasks match the selected types.";
     } else if (filtersActive) {
       empty.textContent = "No tasks match the current filters.";
     } else {
@@ -3985,6 +4196,17 @@ function formatTaskDayOffset(dueAt) {
   return String(days);
 }
 
+function taskDayOffsetSide(dueAt) {
+  const days = getTaskDayOffset(dueAt);
+  if (days === 0) return null;
+  return days > 0 ? "after" : "before";
+}
+
+function taskPipelineOffsetReserveMs(dueAt, span, rowWidthPx) {
+  if (!taskDayOffsetSide(dueAt)) return 0;
+  return (TASKS_PIPELINE_OFFSET_RESERVE_PX / Math.max(rowWidthPx, 1)) * span;
+}
+
 function taskPipelineCompanyKey(entry) {
   return (entry?.deal?.company || "").trim().toLowerCase();
 }
@@ -4044,6 +4266,32 @@ function estimateTaskBarWidthMs(entry, span, rowWidthPx) {
   const widthMs = (approxPx / Math.max(rowWidthPx, 1)) * span;
   const gapMs = (8 / Math.max(rowWidthPx, 1)) * span; // small breathing room
   return Math.max(MS_DAY, widthMs) + gapMs;
+}
+
+function measureTaskPipelineEntryInterval(entry, span, rowWidthPx) {
+  const due = entry.task.dueAt;
+  const barEnd = due + estimateTaskBarWidthMs(entry, span, rowWidthPx);
+  const reserve = taskPipelineOffsetReserveMs(due, span, rowWidthPx);
+  const side = taskDayOffsetSide(due);
+  return {
+    start: side === "before" ? due - reserve : due,
+    end: side === "after" ? barEnd + reserve : barEnd,
+  };
+}
+
+function measureTaskPipelineItemInterval(item, rowWidthPx) {
+  const leftPct = parseFloat(item.style.left) || 0;
+  const leftPx = (leftPct / 100) * rowWidthPx;
+  const widthPx = Math.max(item.offsetWidth, 1);
+  let start = leftPx;
+  let end = leftPx + widthPx + 8;
+  const offset = item.querySelector(".tasks-pipeline-day-offset");
+  if (offset) {
+    const pad = Math.max(offset.offsetWidth, TASKS_PIPELINE_OFFSET_RESERVE_PX) + 8;
+    if (offset.classList.contains("is-overdue")) end += pad;
+    else start -= pad;
+  }
+  return { start, end };
 }
 
 function packIntervalsFirstFit(intervals) {
@@ -4142,15 +4390,14 @@ function assignTaskPipelineRows(entries, span, rowWidthPx = 720) {
     (entry) => entry.task.dueAt,
     taskPipelineCompanyKey
   );
-  applyTaskPipelineClusterPacking(clusters, (entry) => {
-    const start = entry.task.dueAt;
-    return { start, end: start + estimateTaskBarWidthMs(entry, span, rowWidthPx) };
-  });
+  applyTaskPipelineClusterPacking(clusters, (entry) =>
+    measureTaskPipelineEntryInterval(entry, span, rowWidthPx)
+  );
 
   for (const cluster of clusters) {
     for (const member of cluster.members) {
       member.item._pipelineRow = member.row;
-      member.item._pipelineStart = member.start;
+      member.item._pipelineStart = member.item.task.dueAt;
       member.item._pipelineEnd = member.end;
     }
   }
@@ -4173,12 +4420,9 @@ function relayoutTaskPipelineBars() {
     (item) => Number(item.dataset.dueAt) || 0,
     (item) => item.dataset.company || ""
   );
-  const rowCount = applyTaskPipelineClusterPacking(clusters, (item) => {
-    const leftPct = parseFloat(item.style.left) || 0;
-    const leftPx = (leftPct / 100) * rowWidthPx;
-    const widthPx = Math.max(item.offsetWidth, 1);
-    return { start: leftPx, end: leftPx + widthPx + 8 };
-  });
+  const rowCount = applyTaskPipelineClusterPacking(clusters, (item) =>
+    measureTaskPipelineItemInterval(item, rowWidthPx)
+  );
 
   for (const cluster of clusters) {
     for (const member of cluster.members) {
@@ -4273,6 +4517,16 @@ function showTasksPipelineTooltip(bar, deal, task) {
   dueRow.appendChild(dueVal);
 
   tip.append(title, dealRow, ownerRow, dueRow);
+  const typeLabel = taskTypeLabel(task.type);
+  if (typeLabel) {
+    const typeRow = document.createElement("div");
+    typeRow.className = "tasks-pipeline-tooltip-row";
+    typeRow.innerHTML = `<span class="tasks-pipeline-tooltip-label">Type</span>`;
+    const typeVal = document.createElement("span");
+    typeVal.textContent = typeLabel;
+    typeRow.appendChild(typeVal);
+    tip.append(typeRow);
+  }
   tip.hidden = false;
 
   const rect = bar.getBoundingClientRect();
@@ -4402,8 +4656,10 @@ function renderTasksPipeline(entries) {
   if (!visibleEntries.length) {
     const empty = document.createElement("div");
     empty.className = "tasks-pipeline-empty";
-    const filtersActive = hasActiveFilters() || searchQuery;
-    empty.textContent = filtersActive
+    const filtersActive = hasActiveFilters() || searchQuery || taskTypeFilters.size;
+    empty.textContent = taskTypeFilters.size
+      ? "No matching tasks of the selected types in this period"
+      : filtersActive
       ? "No matching tasks in this period"
       : showCompletedTasks
         ? "No tasks in this period — add tasks from a deal’s Tasks tab"
@@ -4444,7 +4700,7 @@ function renderTasksPipeline(entries) {
     if (companyTone) bar.dataset.companyTone = companyTone;
     bar.setAttribute(
       "aria-label",
-      `${task.text}, ${deal.company || "Untitled deal"}, due ${formatTaskDueDate(task.dueAt)}`
+      `${task.text}, ${deal.company || "Untitled deal"}, ${taskTypeLabel(task.type) || "task"}, due ${formatTaskDueDate(task.dueAt)}`
     );
 
     const text = document.createElement("span");
@@ -4460,6 +4716,8 @@ function renderTasksPipeline(entries) {
 
     text.append(label, company);
     bar.append(text);
+    const typeMark = createTaskTypeMark(task.type);
+    if (typeMark) bar.append(typeMark);
     bar.addEventListener("mouseenter", () => showTasksPipelineTooltip(bar, deal, task));
     bar.addEventListener("mousemove", () => showTasksPipelineTooltip(bar, deal, task));
     bar.addEventListener("mouseleave", hideTasksPipelineTooltip);
@@ -4511,6 +4769,8 @@ function renderTaskCard(deal, task) {
   const meta = document.createElement("p");
   meta.className = "task-card-meta";
   const bits = [formatTaskDueDate(task.dueAt)];
+  const typeLabel = taskTypeLabel(task.type);
+  if (typeLabel) bits.push(typeLabel);
   if (task.createdBy) bits.push(`by ${task.createdBy}`);
   if (deal.owner && deal.owner !== task.createdBy) bits.push(deal.owner);
   if (task.done) bits.push("Completed");
@@ -4533,6 +4793,8 @@ function renderTaskCard(deal, task) {
   });
 
   card.append(main, openBtn);
+  const typeMark = createTaskTypeMark(task.type);
+  if (typeMark) card.append(typeMark);
   card.addEventListener("click", () =>
     openModal({ deal, initialPanel: "tasks", focusTaskId: task.id })
   );
@@ -4605,6 +4867,8 @@ function openModal({
   newNoteInput.value = "";
   newTaskNameInput.value = "";
   newTaskDueInput.value = "";
+  newTaskType = "";
+  mountComposerTaskTypePicker();
   setModalPanel(initialPanel);
   renderActivityNotes();
   renderDealTasks();
@@ -4654,6 +4918,7 @@ function applyModalReadOnly(isReadOnly) {
   dealTasksComposer.hidden = isReadOnly;
   newTaskNameInput.readOnly = isReadOnly;
   newTaskDueInput.disabled = isReadOnly;
+  mountComposerTaskTypePicker();
   cancelBtn.textContent = isReadOnly ? "Close" : "Cancel";
 }
 
@@ -4669,6 +4934,8 @@ function closeModal() {
   newNoteInput.value = "";
   newTaskNameInput.value = "";
   newTaskDueInput.value = "";
+  newTaskType = "";
+  mountComposerTaskTypePicker();
   setModalPanel("details");
 }
 
@@ -4790,6 +5057,10 @@ function confirmPendingDraft() {
     if (newTaskDueInput && parseDateInput(newTaskDueInput.value) == null) {
       newTaskDueInput.value = toDateInputValue(Date.now());
     }
+    if (!normalizeTaskType(newTaskType)) {
+      newTaskType = "call";
+      mountComposerTaskTypePicker();
+    }
     addDealTask();
     if (hasPendingTaskDraft()) {
       closePendingDraftModal();
@@ -4903,6 +5174,8 @@ if (tasksShowCompletedBtn) {
     if (activeTab === "tasks") renderTasksView();
   });
 }
+mountComposerTaskTypePicker();
+renderTaskTypeFilter();
 if (tasksClearFiltersBtn) {
   tasksClearFiltersBtn.addEventListener("click", clearFilters);
 }

@@ -336,13 +336,14 @@
           <button type="button" class="btn btn-ghost btn-sm" id="tasksShowCompletedBtn" aria-pressed="false">
             Show completed
           </button>
+          <div class="task-type-filter" id="taskTypeFilter" role="group" aria-label="Filter by task type"></div>
         </div>
         <div class="tasks-toolbar-aside">
           <div class="tasks-view-toggle" role="group" aria-label="Tasks layout">
-            <button type="button" class="tasks-view-btn is-active" data-tasks-view="list" aria-pressed="true">
+            <button type="button" class="tasks-view-btn" data-tasks-view="list" aria-pressed="false">
               List
             </button>
-            <button type="button" class="tasks-view-btn" data-tasks-view="pipeline" aria-pressed="false">
+            <button type="button" class="tasks-view-btn is-active" data-tasks-view="pipeline" aria-pressed="true">
               Pipeline
             </button>
           </div>
@@ -625,10 +626,13 @@
                   form="mhn-task-composer-unbound"
                 />
               </label>
-              <label class="field">
-                <span class="field-label">Due date</span>
-                <input type="date" id="newTaskDueInput" form="mhn-task-composer-unbound" />
-              </label>
+              <div class="deal-task-composer-meta">
+                <label class="field deal-task-due-field">
+                  <span class="field-label">Due date</span>
+                  <input type="date" id="newTaskDueInput" form="mhn-task-composer-unbound" />
+                </label>
+                <div id="newTaskTypePicker"></div>
+              </div>
               <div class="deal-tasks-actions">
                 <button type="button" class="btn btn-ghost btn-sm" id="addTaskBtn">Add task</button>
               </div>

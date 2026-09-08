@@ -2451,7 +2451,7 @@ body.is-card-dragging .card {
 .tasks-pipeline-bar {
   position: relative;
   height: 27px;
-  padding: 0 10px;
+  padding: 0 18px 0 10px;
   background: var(--tasks-pipe-soft);
   border: 1px solid var(--tasks-pipe);
   border-left-width: 4px;
@@ -2460,7 +2460,7 @@ body.is-card-dragging .card {
   font-family: var(--font-sans);
   text-align: left;
   width: max-content;
-  max-width: calc(23ch + 24px);
+  max-width: calc(23ch + 36px);
   min-width: 0;
   overflow: hidden;
   box-shadow: var(--shadow-card);
@@ -2520,6 +2520,13 @@ body.is-card-dragging .card {
   background: var(--chip-rose-bg);
   border-color: var(--chip-rose-line);
   border-left-color: var(--chip-rose-ink);
+}
+
+.tasks-pipeline-bar .task-type-mark {
+  top: 3px;
+  right: 4px;
+  width: 11px;
+  height: 11px;
 }
 
 .tasks-pipeline-bar.is-done {
@@ -2788,12 +2795,13 @@ body.is-card-dragging .card {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 16px;
+  padding: 14px 32px 14px 16px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   cursor: pointer;
+  position: relative;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, background 0.15s ease;
 }
 
@@ -3165,11 +3173,12 @@ body.is-card-dragging .card {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 10px 28px 10px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  position: relative;
 }
 
 .deal-task.is-overdue {
@@ -3206,8 +3215,9 @@ body.is-card-dragging .card {
 }
 
 .deal-task-due {
-  max-width: 180px;
-  width: 100%;
+  max-width: 138px;
+  width: 138px;
+  flex: 0 0 138px;
   height: 34px;
   font-family: var(--font-sans);
   font-size: 13px;
@@ -3215,8 +3225,137 @@ body.is-card-dragging .card {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  padding: 0 10px;
+  padding: 0 8px;
   outline: none;
+}
+
+.deal-task-due-row,
+.deal-task-composer-meta {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.deal-task-due-field {
+  flex: 0 0 138px;
+  max-width: 138px;
+}
+
+.deal-task-due-field input[type="date"] {
+  width: 138px;
+  max-width: 138px;
+  height: 34px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.task-type-picker {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.task-type-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-family: var(--font-sans);
+}
+
+.task-type-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.task-type-btn-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.task-type-glyph {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.task-type-glyph svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.task-type-btn:hover:not(:disabled) .task-type-glyph {
+  border-color: #cfccbf;
+}
+
+.task-type-btn.is-selected .task-type-btn-label,
+.task-type-filter-btn.is-active {
+  color: var(--accent-hover);
+}
+
+.task-type-btn.is-selected .task-type-glyph,
+.task-type-filter-btn.is-active .task-type-glyph {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.task-type-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.task-type-filter-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink-soft);
+  display: inline-flex;
+}
+
+.task-type-filter-btn .task-type-glyph {
+  width: 36px;
+  height: 36px;
+}
+
+.task-type-mark {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 14px;
+  height: 14px;
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+
+.task-type-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .deal-task-due:focus {
@@ -3903,7 +4042,8 @@ body.is-card-dragging .card {
   #pipelineClearFiltersBtn,
   #tasksClearFiltersBtn,
   #dashboardClearFiltersBtn,
-  #tasksShowCompletedBtn {
+  #tasksShowCompletedBtn,
+  .task-type-filter {
     flex-shrink: 0;
     white-space: nowrap;
   }
