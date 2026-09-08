@@ -1021,7 +1021,9 @@ function toTitleCase(value) {
 
 function titleCasePart(part) {
   if (!part) return part;
-  const match = part.match(/^(\W*)(.*?)(\W*)$/);
+  // \W is ASCII-only, so letters like Ž were treated as punctuation and the
+  // following letter (A in Žalgiris) was capitalized as the "first" letter.
+  const match = part.match(/^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u);
   if (!match) return part;
   const [, lead, core, trail] = match;
   if (!core) return part;
@@ -1029,9 +1031,10 @@ function titleCasePart(part) {
   const letters = core.replace(/[^\p{L}]/gu, "");
   const keepAbbreviation =
     letters.length >= 2 && letters === letters.toUpperCase();
+  const chars = [...core];
   const cased = keepAbbreviation
     ? core
-    : core.charAt(0).toUpperCase() + core.slice(1).toLowerCase();
+    : chars[0].toUpperCase() + chars.slice(1).join("").toLowerCase();
   return `${lead}${cased}${trail}`;
 }
 
