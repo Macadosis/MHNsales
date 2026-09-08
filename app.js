@@ -1392,7 +1392,30 @@ function matchesFilters(deal) {
 
 function matchesSearch(deal) {
   if (!searchQuery) return true;
-  return (deal.company || "").toLowerCase().includes(searchQuery);
+  return fieldIncludesQuery(deal.company, searchQuery) || fieldIncludesQuery(deal.contact, searchQuery);
+}
+
+function fieldIncludesQuery(value, query) {
+  return (value || "").toLowerCase().includes(query);
+}
+
+function getDealSearchMatches(query) {
+  const byName = new Map();
+  for (const match of [
+    ...getFieldMatches("company", query, { activeOnly: true, trackPaused: true }),
+    ...getFieldMatches("contact", query, { activeOnly: true, trackPaused: true }),
+  ]) {
+    const key = match.name.toLowerCase();
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, match);
+      continue;
+    }
+    existing.paused = existing.paused || match.paused;
+  }
+  return [...byName.values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 8);
 }
 
 function getFilteredDeals() {
@@ -1661,10 +1684,7 @@ function renderSearchSuggestions(source) {
   if (!state) return;
 
   const query = state.input.value;
-  const matches = getFieldMatches("company", query, {
-    activeOnly: true,
-    trackPaused: true,
-  });
+  const matches = getDealSearchMatches(query);
   state.listEl.innerHTML = "";
   state.activeIndex = -1;
 
