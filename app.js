@@ -2442,7 +2442,7 @@ function renderPipeline() {
     empty.className = "pipeline-empty";
     empty.textContent = hasActiveFilters()
       ? "No matching committed deals in this period"
-      : "No committed deals yet — drag a deal to Committed on the Board";
+      : "No committed deals yet — drag a deal to Committed on the Deals tab";
     pipelineRowsEl.appendChild(empty);
     return;
   }
@@ -2882,7 +2882,7 @@ function renderDashboard() {
         "dash-empty",
         narrowed
           ? "No deals match the current filters."
-          : "No deals yet — create one on the Board and the numbers will show up here."
+          : "No deals yet — create one on the Deals tab and the numbers will show up here."
       )
     );
     return;
