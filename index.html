@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=prod-timeline" />
 </head>
 <body class="is-logged-out">
 
@@ -244,8 +244,8 @@
           <span class="period-label" id="pipelinePeriodLabel"></span>
           <button type="button" class="period-nav" id="pipelineNextBtn" aria-label="Next period">›</button>
           <select class="period-select" id="pipelinePeriodLength" aria-label="Period length">
+            <option value="1" selected>1 month</option>
             <option value="3">3 months</option>
-            <option value="4" selected>4 months</option>
             <option value="6">6 months</option>
             <option value="12">12 months</option>
           </select>
@@ -354,7 +354,6 @@
             <select class="period-select" id="tasksPipelinePeriodLength" aria-label="Period length">
               <option value="1" selected>1 month</option>
               <option value="3">3 months</option>
-              <option value="4">4 months</option>
               <option value="6">6 months</option>
               <option value="12">12 months</option>
             </select>
@@ -857,6 +856,6 @@
   <script src="config.js"></script>
   <script src="db.js"></script>
   <script src="auth.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=prod-timeline"></script>
 </body>
 </html>

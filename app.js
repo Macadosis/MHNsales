@@ -22,8 +22,6 @@ const MS_DAY = 86400000;
 const PIPELINE_ROW_HEIGHT = 56;
 const PIPELINE_BAR_HEIGHT = 36;
 const PIPELINE_BAR_TOP = (PIPELINE_ROW_HEIGHT - PIPELINE_BAR_HEIGHT) / 2;
-/** Matches `.pipeline-row-divider` left/right inset so cut-off bars align with the gray lines. */
-const PIPELINE_EDGE_INSET = 16;
 const TASKS_PIPELINE_ROW_HEIGHT = Math.round(PIPELINE_ROW_HEIGHT * 0.75); // 42
 const TASKS_PIPELINE_BAR_HEIGHT = Math.round(PIPELINE_BAR_HEIGHT * 0.75); // 27
 const TASKS_PIPELINE_BAR_TOP = (TASKS_PIPELINE_ROW_HEIGHT - TASKS_PIPELINE_BAR_HEIGHT) / 2;
@@ -57,6 +55,10 @@ const TASKS_PIPELINE_LOOKBACK_DAYS = 7;
 const TASKS_PIPELINE_LABEL_MAX = 20;
 /** Skip month names when only a leftover sliver is on-screen (avoids overlapping the next month). */
 const TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS = 10;
+/** Keep Today on the left: a short lookback so last month peeks in, future fills the rest. */
+const PIPELINE_LOOKBACK_DAYS = 14;
+/** Skip month names/revenue when only a leftover sliver is on-screen. */
+const PIPELINE_MIN_MONTH_LABEL_DAYS = 10;
 /** Same-company tasks farther apart than this start a new packed cluster. */
 const TASKS_PIPELINE_COMPANY_CLUSTER_GAP_DAYS = 7;
 const TASKS_PIPELINE_COMPANY_TONES = ["sage", "lavender", "sky", "sand", "peach", "rose"];
@@ -70,8 +72,8 @@ const TASK_TYPES = [
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 const pipelineState = {
-  periodMonths: 4,
-  periodStart: startOfMonth(new Date()),
+  periodMonths: 1,
+  anchorDate: null, // window is anchored on this day (defaults to today)
 };
 
 const filters = {
@@ -976,12 +978,7 @@ function reorderDeal(deal, targetStage, insertBeforeId) {
 }
 
 function initPipelinePeriod() {
-  const committed = deals.filter(
-    (deal) => deal.committedAt && deal.stage === "committed"
-  );
-  if (!committed.length) return;
-  const earliest = Math.min(...committed.map((deal) => deal.committedAt));
-  pipelineState.periodStart = startOfMonth(new Date(earliest));
+  pipelineState.anchorDate = startOfDay(new Date());
 }
 
 function startOfDay(date) {
@@ -1048,6 +1045,9 @@ if (!tasksCalendarState.monthStart) {
 if (!tasksPipelineState.anchorDate) {
   tasksPipelineState.anchorDate = startOfDay(new Date());
 }
+if (!pipelineState.anchorDate) {
+  pipelineState.anchorDate = startOfDay(new Date());
+}
 
 function addMonths(date, count) {
   return new Date(date.getFullYear(), date.getMonth() + count, 1);
@@ -1074,7 +1074,13 @@ function formatMonthDay(date) {
 }
 
 function formatMonthLabel(date) {
-  return date.toLocaleDateString("en-US", { month: "long" });
+  return date.toLocaleDateString("en-US", { month: "short" });
+}
+
+/** Hide only a leftover lookback sliver on the left; always label months that start in-view. */
+function shouldShowMonthAxisLabel(monthStart, visibleStart, visibleDays, periodStart, minDays) {
+  const leadingClip = visibleStart <= periodStart && monthStart.getTime() < periodStart;
+  return !leadingClip || visibleDays >= minDays;
 }
 
 /* ------------------------------ Filters ------------------------ */
@@ -2160,14 +2166,20 @@ function getPipelineDeals() {
   );
 }
 
-function getPipelinePeriodEnd() {
-  return addMonths(pipelineState.periodStart, pipelineState.periodMonths);
+function getPipelineAnchor() {
+  return startOfDay(pipelineState.anchorDate || new Date());
 }
 
 function getPipelinePeriodRange() {
-  const start = pipelineState.periodStart.getTime();
-  const end = getPipelinePeriodEnd().getTime();
-  return { start, end, span: end - start };
+  const anchor = getPipelineAnchor();
+  const start = addDays(anchor, -PIPELINE_LOOKBACK_DAYS).getTime();
+  const end = shiftDateByMonths(anchor, pipelineState.periodMonths).getTime();
+  return {
+    start,
+    end,
+    span: Math.max(end - start, MS_DAY),
+    anchor: anchor.getTime(),
+  };
 }
 
 function assignPipelineRows(deals) {
@@ -2220,7 +2232,7 @@ function formatMonthYear(date) {
   return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-function resolvePipelineTodayOverlaps(today, monthTicks) {
+function resolvePipelineTodayOverlaps(monthTicks) {
   const todayTick = pipelineAxisEl.querySelector(".pipeline-tick-today");
   const todayLabel = todayTick?.querySelector(".pipeline-tick-label");
   if (!todayLabel) return;
@@ -2231,13 +2243,9 @@ function resolvePipelineTodayOverlaps(today, monthTicks) {
   const todayRight = todayRect.right + pad;
   const todayMid = (todayRect.left + todayRect.right) / 2;
 
-  for (const { tick, monthStart, monthEnd } of monthTicks) {
+  for (const { tick } of monthTicks) {
     const label = tick.querySelector(".pipeline-tick-label");
     const revenue = tick.querySelector(".pipeline-tick-revenue");
-    const inThisMonth = today >= monthStart.getTime() && today < monthEnd.getTime();
-    const rel = inThisMonth
-      ? (today - monthStart.getTime()) / (monthEnd.getTime() - monthStart.getTime())
-      : null;
 
     for (const el of [label, revenue]) {
       if (!el) continue;
@@ -2245,34 +2253,7 @@ function resolvePipelineTodayOverlaps(today, monthTicks) {
       el.classList.remove("is-shifted-left", "is-shifted-right");
     }
 
-    // Prefer a layout rule when today sits inside this month column.
-    if (inThisMonth && rel != null) {
-      if (rel < 0.42 && label) {
-        // Today near the start — keep month name to the right of TODAY.
-        const labelRect = label.getBoundingClientRect();
-        const shift = Math.max(0, todayRight - labelRect.left);
-        if (shift > 0) {
-          label.style.transform = `translateX(${shift}px)`;
-          label.classList.add("is-shifted-right");
-        }
-      } else if (rel > 0.58 && revenue) {
-        // Today near the end — keep revenue to the left of TODAY.
-        const revenueRect = revenue.getBoundingClientRect();
-        const shift = Math.max(0, revenueRect.right - todayLeft);
-        if (shift > 0) {
-          revenue.style.transform = `translateX(-${shift}px)`;
-          revenue.classList.add("is-shifted-left");
-        }
-      } else {
-        // Today mid-month — push whichever gray text collides away from TODAY.
-        pushPipelineAxisTextClear(label, todayLeft, todayRight, todayMid);
-        pushPipelineAxisTextClear(revenue, todayLeft, todayRight, todayMid);
-      }
-      continue;
-    }
-
-    // Adjacent months: clear any leftover collision (e.g. prior month revenue).
-    pushPipelineAxisTextClear(label, todayLeft, todayRight, todayMid);
+    // Month names stay on the month mark. Only revenue dodges Today.
     pushPipelineAxisTextClear(revenue, todayLeft, todayRight, todayMid);
   }
 }
@@ -2371,36 +2352,52 @@ function showPipelineTooltip(bar, deal, barStart, barEnd, event) {
 function renderPipeline() {
   hidePipelineTooltip();
   const { start: periodStart, end: periodEnd, span } = getPipelinePeriodRange();
-  const periodEndDate = getPipelinePeriodEnd();
   const deals = getPipelineDeals();
 
-  pipelinePeriodLabel.textContent = `${formatMonthDay(pipelineState.periodStart)} – ${formatMonthDay(new Date(periodEndDate.getTime() - MS_DAY))}`;
+  pipelinePeriodLabel.textContent = `${formatMonthDay(new Date(periodStart))} – ${formatMonthDay(new Date(periodEnd - MS_DAY))}`;
   pipelinePeriodLength.value = String(pipelineState.periodMonths);
 
   pipelineAxisEl.innerHTML = "";
+  const months = getOverlappingMonthStarts(periodStart, periodEnd);
   const monthTicks = [];
-  for (let i = 0; i < pipelineState.periodMonths; i += 1) {
-    const monthStart = addMonths(pipelineState.periodStart, i);
+  for (const monthStart of months) {
     const monthEnd = addMonths(monthStart, 1);
+    const visibleStart = Math.max(monthStart.getTime(), periodStart);
+    const visibleEnd = Math.min(monthEnd.getTime(), periodEnd);
+    if (visibleEnd <= visibleStart) continue;
+
     const revenue = getMonthRevenue(deals, monthStart, monthEnd);
-    const left = ((monthStart.getTime() - periodStart) / span) * 100;
-    const width = ((monthEnd.getTime() - monthStart.getTime()) / span) * 100;
+    const left = ((visibleStart - periodStart) / span) * 100;
+    const width = ((visibleEnd - visibleStart) / span) * 100;
+    const visibleDays = (visibleEnd - visibleStart) / MS_DAY;
+    const showMonthLabel = shouldShowMonthAxisLabel(
+      monthStart,
+      visibleStart,
+      visibleDays,
+      periodStart,
+      PIPELINE_MIN_MONTH_LABEL_DAYS
+    );
 
     const tick = document.createElement("div");
     tick.className = "pipeline-tick";
     tick.style.left = `${left}%`;
     tick.style.width = `${width}%`;
 
-    const label = document.createElement("span");
-    label.className = "pipeline-tick-label";
-    label.textContent = formatMonthLabel(monthStart);
+    if (showMonthLabel) {
+      const label = document.createElement("span");
+      label.className = "pipeline-tick-label";
+      label.textContent = formatMonthLabel(monthStart);
 
-    const revenueEl = document.createElement("span");
-    revenueEl.className = "pipeline-tick-revenue";
-    revenueEl.title = `Estimated revenue from deals ending in ${formatMonthYear(monthStart)}`;
-    revenueEl.textContent = fmtEuro.format(revenue);
+      const revenueEl = document.createElement("span");
+      revenueEl.className = "pipeline-tick-revenue";
+      revenueEl.title = `Estimated revenue from deals ending in ${formatMonthYear(monthStart)}`;
+      revenueEl.textContent = fmtEuro.format(revenue);
 
-    tick.append(label, revenueEl);
+      tick.append(label, revenueEl);
+    } else {
+      tick.classList.add("is-sliver");
+    }
+
     pipelineAxisEl.appendChild(tick);
     monthTicks.push({ tick, monthStart, monthEnd, left, width });
   }
@@ -2412,17 +2409,19 @@ function renderPipeline() {
     todayTick.style.left = `${((today - periodStart) / span) * 100}%`;
     todayTick.innerHTML = `<span class="pipeline-tick-label">Today</span>`;
     pipelineAxisEl.appendChild(todayTick);
-    requestAnimationFrame(() => resolvePipelineTodayOverlaps(today, monthTicks));
+    requestAnimationFrame(() => resolvePipelineTodayOverlaps(monthTicks));
   }
 
   pipelineRowsEl.innerHTML = "";
   const rowCount = Math.max(assignPipelineRows(deals), 1);
   pipelineRowsEl.style.height = `${rowCount * PIPELINE_ROW_HEIGHT}px`;
 
-  for (let i = 0; i < pipelineState.periodMonths; i += 1) {
+  for (const monthStart of months) {
+    const monthMs = monthStart.getTime();
+    if (monthMs <= periodStart || monthMs >= periodEnd) continue;
     const gridLine = document.createElement("div");
     gridLine.className = "pipeline-gridline";
-    gridLine.style.left = `${((addMonths(pipelineState.periodStart, i).getTime() - periodStart) / span) * 100}%`;
+    gridLine.style.left = `${((monthMs - periodStart) / span) * 100}%`;
     pipelineRowsEl.appendChild(gridLine);
   }
 
@@ -2455,9 +2454,12 @@ function renderPipeline() {
     const barEnd = deal._pipelineEnd;
 
     if (barEnd <= periodStart || barStart >= periodEnd) continue;
+    // Carry-over that only touches the first visible day has no tail to show.
+    if (barStart < periodStart && barEnd <= periodStart + MS_DAY) continue;
 
     const visibleStart = Math.max(barStart, periodStart);
     const visibleEnd = Math.min(barEnd, periodEnd);
+    if (visibleEnd <= visibleStart) continue;
     const left = ((visibleStart - periodStart) / span) * 100;
     const width = ((visibleEnd - visibleStart) / span) * 100;
 
@@ -2470,17 +2472,19 @@ function renderPipeline() {
     if (continuesEnd) bar.classList.add("continues-end");
     bar.style.top = `${deal._pipelineRow * PIPELINE_ROW_HEIGHT + PIPELINE_BAR_TOP}px`;
 
+    // Place bars on the date axis so tails from earlier periods stay visible.
+    // Flat continues-* edges are clipped by `.pipeline-rows` overflow.
     if (continuesStart && continuesEnd) {
-      bar.style.left = `${PIPELINE_EDGE_INSET}px`;
-      bar.style.right = `${PIPELINE_EDGE_INSET}px`;
+      bar.style.left = "0";
+      bar.style.right = "0";
       bar.style.width = "auto";
     } else if (continuesEnd) {
       bar.style.left = `${left}%`;
-      bar.style.right = `${PIPELINE_EDGE_INSET}px`;
+      bar.style.right = "0";
       bar.style.width = "auto";
     } else if (continuesStart) {
-      bar.style.left = `${PIPELINE_EDGE_INSET}px`;
-      bar.style.width = `calc(${left + width}% - ${PIPELINE_EDGE_INSET}px)`;
+      bar.style.left = "0";
+      bar.style.width = `${left + width}%`;
     } else {
       bar.style.left = `${left}%`;
       bar.style.width = `${width}%`;
@@ -2534,7 +2538,7 @@ function fitPipelineBarLabels() {
 }
 
 function shiftPipelinePeriod(direction) {
-  pipelineState.periodStart = addMonths(pipelineState.periodStart, direction);
+  pipelineState.anchorDate = shiftDateByMonths(getPipelineAnchor(), direction);
   render();
 }
 
@@ -2624,6 +2628,9 @@ function renderColumn(stage, visibleDeals) {
   const body = document.createElement("div");
   body.className = "column-body";
 
+  const stack = document.createElement("div");
+  stack.className = "column-stack";
+
   if (shownDeals.length === 0) {
     const hint = document.createElement("div");
     hint.className = "empty-hint";
@@ -2632,12 +2639,13 @@ function renderColumn(stage, visibleDeals) {
     } else {
       hint.textContent = (filtersActive || searchQuery) ? "No matching deals" : "Drop deals here";
     }
-    body.appendChild(hint);
+    stack.appendChild(hint);
   } else {
     for (const deal of shownDeals) {
-      body.appendChild(renderCard(deal));
+      stack.appendChild(renderCard(deal));
     }
   }
+  body.appendChild(stack);
 
   const footer = document.createElement("div");
   footer.className = "column-footer";
@@ -3952,7 +3960,7 @@ function renderTasksCalendar(entries) {
 
   const monthStart = tasksCalendarState.monthStart || startOfMonth(new Date());
   const monthLabel = monthStart.toLocaleDateString("en-US", {
-    month: "long",
+    month: "short",
     year: "numeric",
   });
 
@@ -4174,8 +4182,8 @@ function renderTasksPipelineScale(periodStart, periodEnd, span) {
       scale.appendChild(tick);
       cursor = addDays(cursor, 1);
     }
-  } else {
-    // Week markers for multi-month views (ISO week numbers).
+  } else if (tasksPipelineState.periodMonths < 12) {
+    // Week markers for 3- and 6-month views (ISO week numbers).
     const seen = new Set();
     let cursor = startOfISOWeek(new Date(periodStart));
     while (cursor.getTime() < periodEnd) {
@@ -4194,6 +4202,8 @@ function renderTasksPipelineScale(periodStart, periodEnd, span) {
       }
       cursor = addDays(cursor, 7);
     }
+  } else {
+    return null;
   }
 
   return scale;
@@ -4585,7 +4595,7 @@ function renderTasksPipeline(entries) {
   );
   tasksPipelineAxisEl.classList.toggle(
     "is-week-scale",
-    tasksPipelineState.periodMonths > 1
+    tasksPipelineState.periodMonths > 1 && tasksPipelineState.periodMonths < 12
   );
 
   const monthsRow = document.createElement("div");
@@ -4601,7 +4611,13 @@ function renderTasksPipeline(entries) {
     const left = ((visibleStart - periodStart) / span) * 100;
     const width = ((visibleEnd - visibleStart) / span) * 100;
     const visibleDays = (visibleEnd - visibleStart) / MS_DAY;
-    const showMonthLabel = visibleDays >= TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS;
+    const showMonthLabel = shouldShowMonthAxisLabel(
+      monthStart,
+      visibleStart,
+      visibleDays,
+      periodStart,
+      TASKS_PIPELINE_MIN_MONTH_LABEL_DAYS
+    );
 
     const tick = document.createElement("div");
     tick.className = "tasks-pipeline-tick";
@@ -4635,10 +4651,9 @@ function renderTasksPipeline(entries) {
     monthsRow.appendChild(todayTick);
   }
 
-  tasksPipelineAxisEl.append(
-    monthsRow,
-    renderTasksPipelineScale(periodStart, periodEnd, span)
-  );
+  const scale = renderTasksPipelineScale(periodStart, periodEnd, span);
+  if (scale) tasksPipelineAxisEl.append(monthsRow, scale);
+  else tasksPipelineAxisEl.append(monthsRow);
 
   tasksPipelineRowsEl.innerHTML = "";
   const rowWidthPx = Math.max(
@@ -6177,6 +6192,10 @@ document.querySelectorAll(".tab").forEach((tab) => {
     hidePipelineTooltip();
     closeAllSearchSuggestions();
     activeTab = tab.dataset.tab;
+    if (activeTab === "pipeline") {
+      // Opening Production always recenters on today so last-month lookback + future span is clear.
+      pipelineState.anchorDate = startOfDay(new Date());
+    }
     document.querySelectorAll(".tab").forEach((t) => {
       t.classList.toggle("is-active", t === tab);
       t.setAttribute("aria-selected", t === tab ? "true" : "false");
@@ -6245,7 +6264,8 @@ document.getElementById("pipelineNextBtn").addEventListener("click", () => {
   shiftPipelinePeriod(pipelineState.periodMonths);
 });
 pipelinePeriodLength.addEventListener("change", () => {
-  pipelineState.periodMonths = Number(pipelinePeriodLength.value) || 4;
+  pipelineState.periodMonths = Number(pipelinePeriodLength.value) || 1;
+  pipelineState.anchorDate = startOfDay(new Date());
   render();
 });
 
