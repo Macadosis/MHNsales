@@ -1446,6 +1446,8 @@ function clearFilters() {
 function closeFilterMenus() {
   openFilterKey = null;
   document.querySelectorAll(".filter-menu").forEach((menu) => {
+    menu.style.boxShadow = "none";
+    void menu.offsetWidth;
     menu.hidden = true;
   });
   document.querySelectorAll(".filter-trigger").forEach((trigger) => {
@@ -1488,6 +1490,8 @@ function renderFilters(containerEl, clearBtn) {
     const menu = document.createElement("div");
     menu.className = "filter-menu";
     menu.hidden = openFilterKey !== key;
+    const menuBody = document.createElement("div");
+    menuBody.className = "filter-menu-body";
 
     const showIncomplete =
       hasIncompleteValues(key) || filters[key].has(INCOMPLETE_FILTER);
@@ -1496,7 +1500,7 @@ function renderFilters(containerEl, clearBtn) {
       const empty = document.createElement("div");
       empty.className = "filter-empty";
       empty.textContent = `No ${label.toLowerCase()} values yet`;
-      menu.appendChild(empty);
+      menuBody.appendChild(empty);
     } else {
       if (showIncomplete) {
         const optionLabel = document.createElement("label");
@@ -1516,7 +1520,7 @@ function renderFilters(containerEl, clearBtn) {
 
         optionLabel.append(checkbox, text);
         appendFilterOptionCount(optionLabel, incompleteCount);
-        menu.appendChild(optionLabel);
+        menuBody.appendChild(optionLabel);
       }
 
       for (const option of options) {
@@ -1537,9 +1541,11 @@ function renderFilters(containerEl, clearBtn) {
 
         optionLabel.append(checkbox, text);
         appendFilterOptionCount(optionLabel, optionCounts.get(option) || 0);
-        menu.appendChild(optionLabel);
+        menuBody.appendChild(optionLabel);
       }
     }
+
+    menu.appendChild(menuBody);
 
     trigger.addEventListener("click", (e) => {
       e.stopPropagation();

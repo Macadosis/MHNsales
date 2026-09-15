@@ -515,6 +515,20 @@ main {
   gap: 12px;
   padding: 0 28px var(--board-gap);
   min-width: 0;
+  position: relative;
+  z-index: 20;
+  overflow: hidden;
+}
+
+.board-toolbar:has(.filter-menu:not([hidden])),
+.board-toolbar:has(.combobox-suggestions:not([hidden])),
+.pipeline-toolbar:has(.filter-menu:not([hidden])),
+.pipeline-toolbar:has(.combobox-suggestions:not([hidden])),
+.tasks-toolbar:has(.filter-menu:not([hidden])),
+.tasks-toolbar:has(.combobox-suggestions:not([hidden])),
+.dashboard-toolbar:has(.filter-menu:not([hidden])),
+.dashboard-toolbar:has(.combobox-suggestions:not([hidden])) {
+  overflow: visible;
 }
 
 .toolbar-scroll {
@@ -717,14 +731,6 @@ main {
   top: calc(100% + 6px);
   left: 0;
   min-width: 220px;
-  /* 6.5 rows so the last visible option is clipped in half on open */
-  max-height: calc(
-    (var(--filter-option-height) * var(--filter-visible-rows)) +
-    (var(--filter-menu-pad) * 2)
-  );
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #d5d2c6 transparent;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -733,7 +739,18 @@ main {
   z-index: 30;
 }
 
-.filter-menu[hidden] { display: none; }
+/* Scroll lives on an inner layer so WebKit doesn't leave the drop-shadow after hide */
+.filter-menu-body {
+  max-height: calc(var(--filter-option-height) * var(--filter-visible-rows));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #d5d2c6 transparent;
+}
+
+.filter-menu[hidden] {
+  display: none !important;
+  box-shadow: none;
+}
 
 .filter-option {
   display: flex;
@@ -1383,6 +1400,9 @@ body.is-card-dragging .card {
   padding: 0 28px var(--board-gap);
   flex-wrap: nowrap;
   min-width: 0;
+  position: relative;
+  z-index: 20;
+  overflow: hidden;
 }
 
 .pipeline-toolbar .toolbar-scroll {
@@ -1453,6 +1473,8 @@ body.is-card-dragging .card {
   min-height: 0;
   padding: 0 28px 28px;
   overflow: auto;
+  position: relative;
+  z-index: 0;
 }
 
 .pipeline-axis {
@@ -1736,6 +1758,9 @@ body.is-card-dragging .card {
   padding: 0 28px var(--board-gap);
   min-width: 0;
   flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  overflow: hidden;
 }
 
 .dashboard-body {
@@ -2206,7 +2231,8 @@ body.is-card-dragging .card {
   flex-wrap: nowrap;
   background: var(--bg);
   position: relative;
-  z-index: 1;
+  z-index: 20;
+  overflow: hidden;
 }
 
 .tasks-toolbar .toolbar-scroll {
@@ -2274,6 +2300,8 @@ body.is-card-dragging .card {
   min-height: 0;
   padding: 0 28px 28px;
   overflow: auto;
+  position: relative;
+  z-index: 0;
   background:
     linear-gradient(180deg, rgba(228, 237, 244, 0.55) 0%, transparent 120px),
     var(--bg);
@@ -3629,7 +3657,8 @@ body.is-card-dragging .card {
 }
 
 .combobox-suggestions[hidden] {
-  display: none;
+  display: none !important;
+  box-shadow: none;
 }
 
 .combobox-suggestion {
@@ -3794,7 +3823,7 @@ body.is-card-dragging .card {
 
 .board::-webkit-scrollbar,
 .pipeline-chart::-webkit-scrollbar,
-.filter-menu::-webkit-scrollbar,
+.filter-menu-body::-webkit-scrollbar,
 .combobox-suggestions::-webkit-scrollbar,
 .activity-notes::-webkit-scrollbar,
 .deal-tasks-list::-webkit-scrollbar,
@@ -3806,7 +3835,7 @@ body.is-card-dragging .card {
 .column-body::-webkit-scrollbar-thumb,
 .board::-webkit-scrollbar-thumb,
 .pipeline-chart::-webkit-scrollbar-thumb,
-.filter-menu::-webkit-scrollbar-thumb,
+.filter-menu-body::-webkit-scrollbar-thumb,
 .combobox-suggestions::-webkit-scrollbar-thumb,
 .activity-notes::-webkit-scrollbar-thumb,
 .deal-tasks-list::-webkit-scrollbar-thumb,
@@ -3815,7 +3844,7 @@ body.is-card-dragging .card {
   border-radius: 999px;
 }
 
-.filter-menu::-webkit-scrollbar-track,
+.filter-menu-body::-webkit-scrollbar-track,
 .combobox-suggestions::-webkit-scrollbar-track,
 .activity-notes::-webkit-scrollbar-track,
 .deal-tasks-list::-webkit-scrollbar-track,
