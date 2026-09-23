@@ -3056,11 +3056,12 @@ function renderDashboard() {
 
   const stack = dashEl("div", "dashboard-stack");
   const grid = dashEl("div", "dashboard-grid");
-  const side = dashEl("div", "dashboard-side");
-  side.append(renderDashDismissedCard(stats, totalCards), renderDashSuccessCard(stats));
-  grid.append(renderDashActiveCard(stats), side);
-  const trend = renderDashTrendCard();
-  stack.append(grid, trend);
+  grid.append(
+    renderDashActiveCard(stats),
+    renderDashDismissedCard(stats, totalCards),
+    renderDashSuccessCard(stats)
+  );
+  stack.append(renderDashTrendCard(), grid);
   dashboardBodyEl.appendChild(stack);
   layoutDashTrend();
 }
@@ -3413,10 +3414,6 @@ function formatTrendMonth(date, { withYear }) {
 function renderDashTrendCard() {
   const card = dashCard("dash-card-trend");
   const head = dashEl("header", "dash-card-head");
-  head.append(dashEl("h2", "dash-label", "Touched vs interested vs committed"));
-  card.append(head);
-
-  const controls = dashEl("div", "dash-trend-controls");
   const legend = dashEl("div", "dash-legend");
   legend.setAttribute("role", "group");
   legend.setAttribute("aria-label", "Stats to show");
@@ -3464,8 +3461,8 @@ function renderDashTrendCard() {
     });
     mode.append(button);
   }
-  controls.append(legend, mode);
-  card.append(controls);
+  head.append(dashEl("h2", "dash-label", "Touched vs interested vs committed"), mode);
+  card.append(head, legend);
 
   const months = getTouchTrend();
   if (!months.length) {
@@ -3518,9 +3515,9 @@ function renderDashTrendChart(canvas, months) {
   const hostW = Math.max(canvas.parentElement?.clientWidth || 0, 280);
   const padL = trendValueMode === "count" ? 34 : 42;
   const padR = 16;
-  const padT = 34;
-  const padB = 26;
-  const svgH = 210;
+  const padT = 26;
+  const padB = 22;
+  const svgH = 168;
   const plotH = svgH - padT - padB;
   const minSlot = 72;
   const plotW = Math.max(hostW - padL - padR, months.length * minSlot);
