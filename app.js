@@ -124,6 +124,7 @@ const commitForm = document.getElementById("commitForm");
 const commitDealName = document.getElementById("commitDealName");
 const implementationFields = document.getElementById("implementationFields");
 const activityNotesEl = document.getElementById("activityNotes");
+const activityNotesOnlyInput = document.getElementById("activityNotesOnly");
 const newNoteInput = document.getElementById("newNoteInput");
 const modalPanelDetails = document.getElementById("modalPanelDetails");
 const modalPanelActivity = document.getElementById("modalPanelActivity");
@@ -759,6 +760,17 @@ async function refreshDealsFromRemote() {
 
 const DEAL_CREATION_NOTE_TEXT = "Deal card created";
 const TASK_COMPLETED_NOTE_KIND = "task-completed";
+const STAGE_PLACEMENT_NOTE_KIND = "stage";
+const PAUSED_NOTE_KIND = "paused";
+const UNPAUSED_NOTE_KIND = "unpaused";
+const ACTIVITY_NOTES_ONLY_KEY = "mhn-activity-notes-only";
+
+let activityNotesOnly = false;
+try {
+  activityNotesOnly = localStorage.getItem(ACTIVITY_NOTES_ONLY_KEY) === "1";
+} catch {
+  /* preference is optional */
+}
 
 function makeDealCreationNote(timestamp, createdBy) {
   const by = String(createdBy || getCurrentUserName() || "").trim();
@@ -802,6 +814,109 @@ function appendTaskCompletedNote(notes, task, timestamp = Date.now()) {
   return note;
 }
 
+function stageLabel(stageId) {
+  return STAGES.find((stage) => stage.id === stageId)?.label || stageId || "";
+}
+
+function makeStagePlacementNote(stageId, timestamp = Date.now(), createdBy = "") {
+  const by = String(createdBy || getCurrentUserName() || "").trim();
+  return {
+    id: crypto.randomUUID(),
+    kind: STAGE_PLACEMENT_NOTE_KIND,
+    stage: stageId,
+    text: `Placed in ${stageLabel(stageId)}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    createdBy: by,
+    updatedBy: by,
+  };
+}
+
+function makePauseActivityNote(paused, timestamp = Date.now(), createdBy = "") {
+  const by = String(createdBy || getCurrentUserName() || "").trim();
+  return {
+    id: crypto.randomUUID(),
+    kind: paused ? PAUSED_NOTE_KIND : UNPAUSED_NOTE_KIND,
+    text: paused ? "Paused" : "Unpaused",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    createdBy: by,
+    updatedBy: by,
+  };
+}
+
+function isStagePlacementNote(note) {
+  return note?.kind === STAGE_PLACEMENT_NOTE_KIND;
+}
+
+function isPauseActivityNote(note) {
+  return note?.kind === PAUSED_NOTE_KIND || note?.kind === UNPAUSED_NOTE_KIND;
+}
+
+function isAutomaticActivityNote(note) {
+  return (
+    isDealCreationNote(note) ||
+    isTaskCompletedNote(note) ||
+    isStagePlacementNote(note) ||
+    isPauseActivityNote(note)
+  );
+}
+
+function hasMatchingActivityNote(notes, note) {
+  return (notes || []).some(
+    (existing) =>
+      existing.kind === note.kind &&
+      existing.createdAt === note.createdAt &&
+      (existing.stage || "") === (note.stage || "")
+  );
+}
+
+function appendActivityNote(deal, note) {
+  if (!deal || !note) return null;
+  if (!Array.isArray(deal.notes)) deal.notes = [];
+  if (hasMatchingActivityNote(deal.notes, note)) return null;
+  deal.notes.push(note);
+  if (editingId === deal.id) {
+    modalNotes.push({ ...note });
+    if (modalPanel === "activity") renderActivityNotes();
+  }
+  return note;
+}
+
+function backfillBracketActivity(deal) {
+  if (!Array.isArray(deal.notes)) deal.notes = [];
+  let changed = false;
+  const by = deal.owner || "";
+  const ensure = (note) => {
+    if (hasMatchingActivityNote(deal.notes, note)) return;
+    deal.notes.push(note);
+    changed = true;
+  };
+
+  const interestedAt = positiveTimestamp(deal.interestedAt);
+  if (interestedAt) ensure(makeStagePlacementNote("interested", interestedAt, by));
+
+  const committedEnteredAt = positiveTimestamp(deal.committedEnteredAt);
+  if (committedEnteredAt) {
+    const placedInPaid =
+      deal.stage === "paid" &&
+      !deal.implementationDays &&
+      !positiveTimestamp(deal.committedAt);
+    ensure(
+      makeStagePlacementNote(
+        placedInPaid ? "paid" : "committed",
+        committedEnteredAt,
+        by
+      )
+    );
+  }
+
+  const pausedAt = positiveTimestamp(deal.pausedAt);
+  if (pausedAt) ensure(makePauseActivityNote(true, pausedAt, by));
+
+  return changed;
+}
+
 function migrateDeals({ persist = true } = {}) {
   let changed = false;
   const changedIds = new Set();
@@ -832,6 +947,11 @@ function migrateDeals({ persist = true } = {}) {
         changed = true;
         changedIds.add(deal.id);
       }
+    }
+
+    if (backfillBracketActivity(deal)) {
+      changed = true;
+      changedIds.add(deal.id);
     }
 
     const ownerName = (deal.owner || "").trim();
@@ -955,6 +1075,14 @@ function ensureBoardOrders() {
   return changedIds;
 }
 
+/** Remember when a deal was moved into Interested or Committed. */
+function stampStageEntered(deal, previousStage, now = Date.now()) {
+  if (!deal || deal.stage === previousStage) return;
+  if (deal.stage === "interested") deal.interestedAt = now;
+  if (deal.stage === "committed") deal.committedEnteredAt = now;
+  if (deal.stage === "paid" && !deal.committedEnteredAt) deal.committedEnteredAt = now;
+}
+
 function nextBoardOrder(stage) {
   const list = getStageDeals(stage);
   if (!list.length) return 0;
@@ -962,7 +1090,7 @@ function nextBoardOrder(stage) {
 }
 
 /** @returns {string[]} ids of deals whose stage/boardOrder changed */
-function reorderDeal(deal, targetStage, insertBeforeId) {
+function reorderDeal(deal, targetStage, insertBeforeId, now = Date.now()) {
   const siblings = getStageDeals(targetStage, { excludeId: deal.id });
   let insertAt = siblings.length;
   if (insertBeforeId) {
@@ -970,11 +1098,28 @@ function reorderDeal(deal, targetStage, insertBeforeId) {
     if (idx >= 0) insertAt = idx;
   }
   siblings.splice(insertAt, 0, deal);
+  const previousStage = deal.stage;
   deal.stage = targetStage;
+  stampStageEntered(deal, previousStage, now);
   siblings.forEach((d, i) => {
     d.boardOrder = i;
   });
   return siblings.map((d) => d.id);
+}
+
+/** Log a column move, and an unpause when a paused card leaves Prospects. */
+function moveDealToStage(deal, targetStage, insertBeforeId, now = Date.now()) {
+  const previousStage = deal.stage;
+  const ids = reorderDeal(deal, targetStage, insertBeforeId, now);
+  const by = stampCurrentUser(deal.owner);
+  if (previousStage !== deal.stage && deal.stage !== "dismissed") {
+    appendActivityNote(deal, makeStagePlacementNote(deal.stage, now, by));
+  }
+  if (isDealPaused(deal) && deal.stage !== "prospects") {
+    delete deal.pausedAt;
+    appendActivityNote(deal, makePauseActivityNote(false, now, by));
+  }
+  return ids;
 }
 
 function initPipelinePeriod() {
@@ -2051,19 +2196,23 @@ function confirmPauseAction() {
 
 function pauseDeal(deal) {
   if (!deal || deal.stage === "dismissed") return;
-  deal.pausedAt = Date.now();
+  const now = Date.now();
+  deal.pausedAt = now;
   if (deal.stage !== "prospects") {
     deal.boardOrder = nextBoardOrder("prospects");
     deal.stage = "prospects";
   }
+  appendActivityNote(deal, makePauseActivityNote(true, now, stampCurrentUser(deal.owner)));
   saveDeals(deal.id);
   render();
 }
 
 function unpauseDeal(deal) {
   if (!deal || !isDealPaused(deal)) return;
+  const now = Date.now();
   delete deal.pausedAt;
   deal.stage = "prospects";
+  appendActivityNote(deal, makePauseActivityNote(false, now, stampCurrentUser(deal.owner)));
   const stillPaused = getActiveDeals().some((d) => isDealPaused(d));
   if (!stillPaused) showPausedProspectsOnly = false;
   saveDeals(deal.id);
@@ -2905,12 +3054,31 @@ function renderDashboard() {
     return;
   }
 
+  const stack = dashEl("div", "dashboard-stack");
   const grid = dashEl("div", "dashboard-grid");
   const side = dashEl("div", "dashboard-side");
   side.append(renderDashDismissedCard(stats, totalCards), renderDashSuccessCard(stats));
   grid.append(renderDashActiveCard(stats), side);
-  dashboardBodyEl.appendChild(grid);
+  const trend = renderDashTrendCard();
+  stack.append(grid, trend);
+  dashboardBodyEl.appendChild(stack);
+  layoutDashTrend();
 }
+
+function layoutDashTrend() {
+  const canvas = dashboardBodyEl.querySelector(".dash-trend-canvas");
+  if (!canvas) return;
+  canvas.replaceChildren();
+  canvas.style.width = "";
+  renderDashTrendChart(canvas, getTouchTrend());
+}
+
+let trendResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (activeTab !== "dashboard") return;
+  clearTimeout(trendResizeTimer);
+  trendResizeTimer = setTimeout(layoutDashTrend, 120);
+});
 
 function renderDashActiveCard(stats) {
   const card = dashCard("dash-card-hero");
@@ -3035,6 +3203,500 @@ function renderDashSuccessCard(stats) {
     )
   );
   return card;
+}
+
+/* Monthly outreach result.
+   Touched: the first completed task, dated by when it was marked done.
+   An open task does not count. Later completed tasks do not move the deal.
+   Interested / Committed: dated by when the deal was moved into that column.
+   Paid deals stay on the Committed line, using the date they were committed. */
+
+const TREND_SERIES = [
+  { key: "touched", label: "Touched", color: "var(--accent)" },
+  { key: "interested", label: "Interested", color: "var(--stage-interested)" },
+  { key: "committed", label: "Committed", color: "var(--stage-committed)" },
+];
+
+const trendSeriesOn = {
+  touched: true,
+  interested: true,
+  committed: true,
+};
+
+let trendValueMode = "count";
+
+function taskCompletedAt(task) {
+  if (!task?.done) return null;
+  const text = String(task.text || "").trim();
+  if (!text || text === DEAL_CREATION_NOTE_TEXT) return null;
+  return positiveTimestamp(task.completedAt);
+}
+
+function firstTouchAt(deal) {
+  let earliest = null;
+  for (const task of deal.tasks || []) {
+    const at = taskCompletedAt(task);
+    if (at == null) continue;
+    if (earliest == null || at < earliest) earliest = at;
+  }
+  return earliest;
+}
+
+function monthIndex(date) {
+  return date.getFullYear() * 12 + date.getMonth();
+}
+
+function dateFromMonthIndex(index) {
+  return new Date(Math.floor(index / 12), index % 12, 1);
+}
+
+function getDashboardDeals() {
+  return [...getFilteredDeals(), ...getDismissedDealsMatchingFilters()];
+}
+
+function positiveTimestamp(value) {
+  const at = Number(value);
+  return Number.isFinite(at) && at > 0 ? at : null;
+}
+
+function dealInterestedAt(deal) {
+  return positiveTimestamp(deal?.interestedAt);
+}
+
+function dealCommittedEnteredAt(deal) {
+  const entered = positiveTimestamp(deal?.committedEnteredAt);
+  if (entered != null) return entered;
+  // Older deals only stored the implementation start.
+  if (deal?.stage === "committed" || deal?.stage === "paid" || deal?.implementationDays) {
+    return positiveTimestamp(deal?.committedAt);
+  }
+  return null;
+}
+
+function emptyTrendBucket(start) {
+  return {
+    start,
+    touched: 0,
+    interested: 0,
+    committed: 0,
+    interestedDays: [],
+    committedDays: [],
+  };
+}
+
+function calendarDaysBetween(startMs, endMs) {
+  const start = startOfDay(new Date(startMs)).getTime();
+  const end = startOfDay(new Date(endMs)).getTime();
+  return Math.round((end - start) / MS_DAY);
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2) return sorted[mid];
+  return Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+/** Days from the earliest completion that happened before the stage move. */
+function daysFromTouch(deal, stageAt) {
+  if (stageAt == null) return null;
+  let earliest = null;
+  for (const task of deal.tasks || []) {
+    const at = taskCompletedAt(task);
+    if (at == null || at > stageAt) continue;
+    if (earliest == null || at < earliest) earliest = at;
+  }
+  if (earliest == null) return null;
+  const days = calendarDaysBetween(earliest, stageAt);
+  return days < 0 ? null : days;
+}
+
+function trendBucket(buckets, at) {
+  const index = monthIndex(startOfMonth(new Date(at)));
+  let bucket = buckets.get(index);
+  if (!bucket) {
+    bucket = emptyTrendBucket(dateFromMonthIndex(index));
+    buckets.set(index, bucket);
+  }
+  return bucket;
+}
+
+function getTouchTrend() {
+  const buckets = new Map();
+  for (const deal of getDashboardDeals()) {
+    const touchedAt = firstTouchAt(deal);
+    if (touchedAt != null) trendBucket(buckets, touchedAt).touched += 1;
+
+    const interestedAt = dealInterestedAt(deal);
+    if (interestedAt != null) {
+      const bucket = trendBucket(buckets, interestedAt);
+      bucket.interested += 1;
+      const days = daysFromTouch(deal, interestedAt);
+      if (days != null) bucket.interestedDays.push(days);
+    }
+
+    const committedAt = dealCommittedEnteredAt(deal);
+    if (committedAt != null) {
+      const bucket = trendBucket(buckets, committedAt);
+      bucket.committed += 1;
+      const days = daysFromTouch(deal, committedAt);
+      if (days != null) bucket.committedDays.push(days);
+    }
+  }
+
+  if (!buckets.size) return [];
+
+  const keys = [...buckets.keys()];
+  const first = Math.min(...keys);
+  const now = monthIndex(startOfMonth(new Date()));
+  const last = Math.max(now, ...keys);
+  const months = [];
+  for (let index = first; index <= last; index++) {
+    months.push(buckets.get(index) || emptyTrendBucket(dateFromMonthIndex(index)));
+  }
+  return months;
+}
+
+function visibleTrendSeries() {
+  return TREND_SERIES.filter((series) => {
+    if (!trendSeriesOn[series.key]) return false;
+    if (trendValueMode !== "count" && series.key === "touched") return false;
+    return true;
+  });
+}
+
+function trendPointValue(month, key) {
+  if (trendValueMode === "days") {
+    if (key === "touched") return null;
+    return median(month[`${key}Days`] || []);
+  }
+  if (trendValueMode !== "percent" || key === "touched") return month[key];
+  if (!month.touched) return null;
+  return (month[key] / month.touched) * 100;
+}
+
+function formatTrendPoint(value) {
+  if (value == null) return "—";
+  if (trendValueMode === "days") return `${value}d`;
+  if (trendValueMode !== "percent") return String(value);
+  if (value > 0 && value < 1) return "<1%";
+  return `${Math.round(value)}%`;
+}
+
+function trendHasDaySamples(months) {
+  return months.some((month) => month.interestedDays.length || month.committedDays.length);
+}
+
+function trendAxisScale(maxValue) {
+  const peak = Math.max(1, maxValue);
+  if (peak <= 4) {
+    return { max: peak, ticks: Array.from({ length: peak + 1 }, (_, i) => i) };
+  }
+  const raw = peak / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const err = raw / mag;
+  const step = (err <= 1 ? 1 : err <= 2 ? 2 : err <= 5 ? 5 : 10) * mag;
+  const max = Math.ceil(peak / step) * step;
+  const ticks = [];
+  for (let i = 0; i <= max / step; i++) ticks.push(i * step);
+  return { max, ticks };
+}
+
+function formatTrendMonth(date, { withYear }) {
+  const month = date.toLocaleDateString("en-US", { month: "short" });
+  if (!withYear) return month;
+  const year = String(date.getFullYear()).slice(-2);
+  return `${month} ’${year}`;
+}
+
+function renderDashTrendCard() {
+  const card = dashCard("dash-card-trend");
+  const head = dashEl("header", "dash-card-head");
+  head.append(dashEl("h2", "dash-label", "Touched vs interested vs committed"));
+  card.append(head);
+
+  const controls = dashEl("div", "dash-trend-controls");
+  const legend = dashEl("div", "dash-legend");
+  legend.setAttribute("role", "group");
+  legend.setAttribute("aria-label", "Stats to show");
+  for (const series of TREND_SERIES) {
+    const button = dashEl("button", "dash-series-toggle");
+    button.type = "button";
+    button.dataset.series = series.key;
+    const selected = trendSeriesOn[series.key];
+    const muted = trendValueMode !== "count" && series.key === "touched";
+    button.classList.toggle("is-active", selected && !muted);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+    if (muted) {
+      button.disabled = true;
+      button.title = trendValueMode === "days"
+        ? "Days measures the wait after the first completed task. Switch to Count to plot Touched."
+        : "Percent compares Interested and Committed with Touched. Switch to Count to plot Touched.";
+    }
+    const swatch = dashEl("span", "dash-legend-swatch");
+    swatch.dataset.series = series.key;
+    button.append(swatch, document.createTextNode(series.label));
+    button.addEventListener("click", () => {
+      trendSeriesOn[series.key] = !trendSeriesOn[series.key];
+      render();
+    });
+    legend.append(button);
+  }
+
+  const mode = dashEl("div", "dash-trend-mode");
+  mode.setAttribute("role", "group");
+  mode.setAttribute("aria-label", "Count, percent, or days");
+  for (const option of [
+    { id: "count", label: "Count" },
+    { id: "percent", label: "%" },
+    { id: "days", label: "Days" },
+  ]) {
+    const button = dashEl("button", "dash-trend-mode-btn");
+    button.type = "button";
+    const on = trendValueMode === option.id;
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    button.textContent = option.label;
+    button.addEventListener("click", () => {
+      trendValueMode = option.id;
+      render();
+    });
+    mode.append(button);
+  }
+  controls.append(legend, mode);
+  card.append(controls);
+
+  const months = getTouchTrend();
+  if (!months.length) {
+    card.append(
+      dashEl(
+        "p",
+        "dash-note",
+        "Nothing to plot yet. Complete a task to count a deal as touched, or move a deal into Interested or Committed."
+      )
+    );
+    return card;
+  }
+
+  if (!visibleTrendSeries().length) {
+    card.append(dashEl("p", "dash-note", "Select at least one stat to draw the chart."));
+    return card;
+  }
+
+  if (trendValueMode === "days" && !trendHasDaySamples(months)) {
+    card.append(
+      dashEl(
+        "p",
+        "dash-note",
+        "No day counts yet. A deal needs a completed task dated before it was moved into Interested or Committed."
+      )
+    );
+    return card;
+  }
+
+  const chart = dashEl("div", "dash-trend");
+  chart.append(dashEl("div", "dash-trend-canvas"));
+  card.append(chart);
+
+  card.append(
+    dashEl(
+      "p",
+      "dash-note",
+      trendValueMode === "percent"
+        ? "Percent is Interested or Committed divided by deals touched that month. Interested uses the date the deal was moved into that column. Committed uses the date it was moved into Committed. Paid stays with Committed."
+        : trendValueMode === "days"
+          ? "Days is the median from the first completed task to the move into that column. A task finished after the move does not count. The month is when the deal was moved. Paid stays with Committed."
+          : "Touched is the date the first task was marked done. Open tasks do not count. Interested and Committed use the date the deal was moved into that column. Paid stays with Committed."
+    )
+  );
+  return card;
+}
+
+function renderDashTrendChart(canvas, months) {
+  const seriesList = visibleTrendSeries();
+  const hostW = Math.max(canvas.parentElement?.clientWidth || 0, 280);
+  const padL = trendValueMode === "count" ? 34 : 42;
+  const padR = 16;
+  const padT = 34;
+  const padB = 26;
+  const svgH = 210;
+  const plotH = svgH - padT - padB;
+  const minSlot = 72;
+  const plotW = Math.max(hostW - padL - padR, months.length * minSlot);
+  const svgW = padL + plotW + padR;
+  const slot = plotW / months.length;
+
+  let peak = 0;
+  for (const month of months) {
+    for (const series of seriesList) {
+      const value = trendPointValue(month, series.key);
+      if (value != null) peak = Math.max(peak, value);
+    }
+  }
+  const scale = trendValueMode === "percent" && peak <= 100
+    ? { max: 100, ticks: [0, 25, 50, 75, 100] }
+    : trendAxisScale(peak);
+  const yFor = (value) => padT + plotH - (value / scale.max) * plotH;
+  const xFor = (index) => padL + index * slot + slot / 2;
+
+  const crossesYear = months.some((month) => month.start.getFullYear() !== months[0].start.getFullYear());
+
+  const svg = createSvgEl("svg", {
+    width: String(svgW),
+    height: String(svgH),
+    viewBox: `0 0 ${svgW} ${svgH}`,
+    role: "img",
+  });
+  const summary = months
+    .map((month) => {
+      const bits = seriesList.map((series) => {
+        const value = trendPointValue(month, series.key);
+        return `${series.label} ${formatTrendPoint(value)}`;
+      });
+      return `${formatMonthYear(month.start)}: ${bits.join(", ")}`;
+    })
+    .join(". ");
+  const title = createSvgEl("title");
+  title.textContent = summary;
+  svg.append(title);
+
+  for (const tick of scale.ticks) {
+    const y = yFor(tick);
+    svg.append(
+      createSvgEl("line", {
+        class: "dash-trend-grid",
+        x1: String(padL),
+        x2: String(svgW - padR),
+        y1: String(y),
+        y2: String(y),
+      })
+    );
+    const label = createSvgEl("text", {
+      class: "dash-trend-tick",
+      x: String(padL - 8),
+      y: String(y + 3),
+      "text-anchor": "end",
+    });
+    label.textContent = trendValueMode === "percent" ? `${tick}%` : String(tick);
+    svg.append(label);
+  }
+
+  const hideTip = () => {
+    tip.hidden = true;
+    svg.querySelectorAll(".dash-trend-hit.is-active").forEach((el) => el.classList.remove("is-active"));
+  };
+
+  const showTip = (month, index, hit) => {
+    svg.querySelectorAll(".dash-trend-hit.is-active").forEach((el) => el.classList.remove("is-active"));
+    hit.classList.add("is-active");
+    tip.replaceChildren();
+    tip.append(dashEl("div", "dash-trend-tip-title", formatMonthYear(month.start)));
+    const rows = trendValueMode === "count" ? seriesList : TREND_SERIES;
+    for (const series of rows) {
+      if (trendValueMode !== "count" && series.key === "touched") continue;
+      if (!trendSeriesOn[series.key]) continue;
+      const row = dashEl("div", "dash-trend-tip-row");
+      const swatch = dashEl("span", "dash-legend-swatch");
+      swatch.dataset.series = series.key;
+      let text = `${series.label} ${month[series.key]}`;
+      if (trendValueMode === "percent") {
+        text += ` (${formatTrendPoint(trendPointValue(month, series.key))})`;
+      } else if (trendValueMode === "days") {
+        const samples = month[`${series.key}Days`] || [];
+        const noun = samples.length === 1 ? "deal" : "deals";
+        text = samples.length
+          ? `${series.label} ${formatTrendPoint(median(samples))} · ${samples.length} ${noun}`
+          : `${series.label} —`;
+      }
+      row.append(swatch, document.createTextNode(text));
+      tip.append(row);
+    }
+    tip.hidden = false;
+    const tipW = tip.offsetWidth;
+    const x = Math.max(tipW / 2 + 4, Math.min(xFor(index), svgW - tipW / 2 - 4));
+    tip.style.left = `${x}px`;
+    tip.style.top = `${padT}px`;
+  };
+
+  months.forEach((month, index) => {
+    const slotX = padL + index * slot;
+    const hit = createSvgEl("rect", {
+      class: "dash-trend-hit",
+      x: String(slotX),
+      y: "0",
+      width: String(slot),
+      height: String(svgH - padB),
+    });
+    hit.addEventListener("pointerenter", (e) => {
+      if (e.pointerType === "touch") return;
+      showTip(month, index, hit);
+    });
+    hit.addEventListener("pointerup", () => showTip(month, index, hit));
+    svg.append(hit);
+
+    const label = createSvgEl("text", {
+      class: "dash-trend-label",
+      x: String(xFor(index)),
+      y: String(svgH - 8),
+      "text-anchor": "middle",
+    });
+    const showYear = crossesYear && (index === 0 || month.start.getMonth() === 0);
+    label.textContent = formatTrendMonth(month.start, { withYear: showYear });
+    svg.append(label);
+  });
+
+  const barGap = 3;
+  const barW = Math.max(
+    6,
+    Math.min(16, (slot - 18 - barGap * Math.max(0, seriesList.length - 1)) / seriesList.length)
+  );
+  const groupW = barW * seriesList.length + barGap * Math.max(0, seriesList.length - 1);
+
+  months.forEach((month, index) => {
+    const slotX = padL + index * slot;
+    const groupX = slotX + (slot - groupW) / 2;
+    seriesList.forEach((series, seriesIndex) => {
+      const value = trendPointValue(month, series.key);
+      if (value == null) return;
+      if (value === 0 && trendValueMode === "count") return;
+      const h = value === 0 ? 3 : Math.max(3, (value / scale.max) * plotH);
+      const x = groupX + seriesIndex * (barW + barGap);
+      const y = padT + plotH - h;
+      svg.append(
+        createSvgEl("rect", {
+          class: "dash-trend-bar",
+          "data-series": series.key,
+          x: String(x),
+          y: String(y),
+          width: String(barW),
+          height: String(h),
+          rx: "2",
+        })
+      );
+      const valueLabel = createSvgEl("text", {
+        class: "dash-trend-point-label",
+        "data-series": series.key,
+        x: String(x + barW / 2),
+        y: String(y - 6),
+        "text-anchor": "middle",
+      });
+      valueLabel.textContent = formatTrendPoint(value);
+      svg.append(valueLabel);
+    });
+  });
+
+  canvas.style.width = `${svgW}px`;
+  canvas.append(svg);
+
+  const tip = dashEl("div", "dash-trend-tip");
+  tip.hidden = true;
+  canvas.append(tip);
+
+  svg.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "touch") return;
+    hideTip();
+  });
 }
 
 /* ------------------------------ Drag & drop -------------------- */
@@ -3238,7 +3900,11 @@ function commitDragDrop(clientX, clientY) {
   const target = dragState.dropTarget || getDropTargetAt(clientX, clientY);
   if (!target?.stage) return;
 
-  if (target.stage === "committed" && deal.stage !== "committed") {
+  if (
+    target.stage === "committed" &&
+    deal.stage !== "committed" &&
+    !hasImplementationSchedule(deal)
+  ) {
     openCommitModal(deal);
     return;
   }
@@ -3248,11 +3914,7 @@ function commitDragDrop(clientX, clientY) {
   const nextId = ordered[oldIndex + 1]?.id || null;
   if (deal.stage === target.stage && target.insertBeforeId === nextId) return;
 
-  reorderDeal(deal, target.stage, target.insertBeforeId);
-  // Paused deals live in Prospects; leaving that column clears the pause.
-  if (isDealPaused(deal) && deal.stage !== "prospects") {
-    delete deal.pausedAt;
-  }
+  moveDealToStage(deal, target.stage, target.insertBeforeId);
   if (
     isDealPinned(deal) &&
     countPinnedInStage(deal.stage, { excludeId: deal.id }) >= MAX_PINNED_PER_STAGE
@@ -3339,6 +4001,10 @@ document.addEventListener("pointercancel", (e) => {
 
 /* --------------------------- Commit modal ----------------------- */
 
+function hasImplementationSchedule(deal) {
+  return Boolean(deal?.committedAt) && Number(deal?.implementationDays) > 0;
+}
+
 function openCommitModal(deal) {
   pendingCommitDeal = deal;
   commitDealName.textContent = deal.company;
@@ -3368,8 +4034,7 @@ commitForm.addEventListener("submit", (e) => {
 
   pendingCommitDeal.committedAt = startDate;
   pendingCommitDeal.implementationDays = days;
-  delete pendingCommitDeal.pausedAt;
-  reorderDeal(pendingCommitDeal, "committed", null);
+  moveDealToStage(pendingCommitDeal, "committed", null);
   saveDeals(getStageDeals("committed").map((d) => d.id));
   render();
   closeCommitModal();
@@ -3650,22 +4315,27 @@ function resizeActivityNote(textarea) {
 function renderActivityNotes() {
   activityNotesEl.innerHTML = "";
 
-  if (!modalNotes.length) {
-    const empty = document.createElement("p");
-    empty.className = "activity-empty";
-    empty.textContent = "No notes yet. Add the first one below.";
-    activityNotesEl.appendChild(empty);
-    return;
-  }
-
   const sorted = [...modalNotes].sort((a, b) => {
     const aBirth = isDealCreationNote(a) ? 1 : 0;
     const bBirth = isDealCreationNote(b) ? 1 : 0;
     if (aBirth !== bBirth) return aBirth - bBirth;
     return (b.createdAt || 0) - (a.createdAt || 0);
   });
+  const visible = activityNotesOnly
+    ? sorted.filter((note) => !isAutomaticActivityNote(note))
+    : sorted;
 
-  for (const note of sorted) {
+  if (!visible.length) {
+    const empty = document.createElement("p");
+    empty.className = "activity-empty";
+    empty.textContent = modalNotes.length
+      ? "Automatic activity is hidden."
+      : "No notes yet. Add the first one below.";
+    activityNotesEl.appendChild(empty);
+    return;
+  }
+
+  for (const note of visible) {
     const card = document.createElement("article");
     card.className = "activity-note";
     card.dataset.noteId = note.id;
@@ -3674,7 +4344,7 @@ function renderActivityNotes() {
     time.className = "activity-note-time";
     updateActivityNoteTime(note, time);
 
-    const isSystem = isDealCreationNote(note) || isTaskCompletedNote(note);
+    const isSystem = isAutomaticActivityNote(note);
     if (isSystem) {
       card.classList.add("is-system");
       const body = document.createElement("p");
@@ -4885,10 +5555,11 @@ function openModal({
     form.elements.tool.value = deal.tool || "";
     form.elements.owner.value = deal.owner || "";
 
-    const showImplementation = deal.stage === "committed";
+    const showImplementation =
+      deal.stage === "committed" || deal.stage === "paid" || deal.stage === "failed";
     implementationFields.hidden = !showImplementation;
-    form.elements.implementationStart.required = showImplementation;
-    form.elements.implementationDuration.required = showImplementation;
+    form.elements.implementationStart.required = deal.stage === "committed";
+    form.elements.implementationDuration.required = deal.stage === "committed";
 
     if (showImplementation) {
       form.elements.implementationStart.value = deal.committedAt
@@ -5139,6 +5810,7 @@ function saveDealFromForm() {
           ? String(note.updatedBy || stampCurrentUser(note.createdBy)).trim()
           : String(note.createdBy || "").trim(),
         ...(note.kind ? { kind: note.kind } : {}),
+        ...(note.stage ? { stage: note.stage } : {}),
       }))
       .filter((note) => note.text),
     tasks: serializeModalTasks().map((task) => ({
@@ -5154,12 +5826,15 @@ function saveDealFromForm() {
     const deal = deals.find((d) => d.id === editingId);
     Object.assign(deal, data);
 
-    if (deal.stage === "committed") {
+    if (deal.stage === "committed" || deal.stage === "paid" || deal.stage === "failed") {
       const startDate = parseDateInput(form.elements.implementationStart.value);
       const days = Number(form.elements.implementationDuration.value);
-      if (!startDate || !days || days < 1) return;
-      deal.committedAt = startDate;
-      deal.implementationDays = days;
+      const scheduleRequired = deal.stage === "committed";
+      if (scheduleRequired && (!startDate || !days || days < 1)) return;
+      if (startDate && days >= 1) {
+        deal.committedAt = startDate;
+        deal.implementationDays = days;
+      }
     }
     saveDeals(deal.id);
   } else {
@@ -5170,9 +5845,17 @@ function saveDealFromForm() {
       createdAt,
       ...data,
       boardOrder: nextBoardOrder(createStage),
-      notes: [makeDealCreationNote(createdAt), ...(data.notes || [])],
+      notes: [
+        makeDealCreationNote(createdAt),
+        ...(createStage !== "prospects"
+          ? [makeStagePlacementNote(createStage, createdAt, data.owner)]
+          : []),
+        ...(data.notes || []),
+      ],
       tasks: data.tasks || [],
     };
+    if (createStage === "interested") newDeal.interestedAt = createdAt;
+    if (createStage === "committed" || createStage === "paid") newDeal.committedEnteredAt = createdAt;
     deals.push(newDeal);
     saveDeals(newDeal.id);
   }
@@ -5198,6 +5881,19 @@ form.addEventListener("submit", (e) => {
 document.querySelectorAll(".modal-tab").forEach((tab) => {
   tab.addEventListener("click", () => setModalPanel(tab.dataset.modalTab));
 });
+if (activityNotesOnlyInput) {
+  activityNotesOnlyInput.checked = activityNotesOnly;
+  activityNotesOnlyInput.addEventListener("change", () => {
+    activityNotesOnly = activityNotesOnlyInput.checked;
+    try {
+      localStorage.setItem(ACTIVITY_NOTES_ONLY_KEY, activityNotesOnly ? "1" : "0");
+    } catch {
+      /* preference is optional */
+    }
+    renderActivityNotes();
+  });
+}
+
 document.getElementById("addNoteBtn").addEventListener("click", addActivityNote);
 document.getElementById("addTaskBtn").addEventListener("click", addDealTask);
 newTaskNameInput.addEventListener("keydown", (e) => {
