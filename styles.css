@@ -3266,6 +3266,26 @@ body.is-card-dragging .card {
   min-height: 220px;
 }
 
+.activity-notes-only {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.activity-notes-only input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+}
+
 .activity-notes {
   display: flex;
   flex-direction: column;
