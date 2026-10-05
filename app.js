@@ -5238,10 +5238,14 @@ function showTasksPipelineTooltip(bar, deal, task) {
   const rect = bar.getBoundingClientRect();
   const tipWidth = tip.offsetWidth || 220;
   const tipHeight = tip.offsetHeight || 96;
-  let left = rect.left + rect.width / 2 - tipWidth / 2;
-  let top = rect.top - tipHeight - 10;
+  const gap = 10;
+  let left = rect.right + gap;
+  if (left + tipWidth > window.innerWidth - 8) {
+    left = rect.left - tipWidth - gap;
+  }
   left = Math.max(8, Math.min(left, window.innerWidth - tipWidth - 8));
-  if (top < 8) top = rect.bottom + 10;
+  let top = rect.top + rect.height / 2 - tipHeight / 2;
+  top = Math.max(8, Math.min(top, window.innerHeight - tipHeight - 8));
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
 }
