@@ -112,6 +112,7 @@ const pauseConfirmBtn = document.getElementById("pauseConfirmBtn");
 let pendingPauseDealId = null;
 let pauseConfirmAction = "pause"; // "pause" | "unpause"
 let showPausedProspectsOnly = false;
+let showTouchedProspectsOnly = false;
 
 const pendingDraftOverlay = document.getElementById("pendingDraftOverlay");
 const pendingDraftTitle = document.getElementById("pendingDraftTitle");
@@ -2221,12 +2222,20 @@ function unpauseDeal(deal) {
 
 function togglePausedProspectsView() {
   showPausedProspectsOnly = !showPausedProspectsOnly;
+  if (showPausedProspectsOnly) showTouchedProspectsOnly = false;
   render();
 }
 
-function clearPausedProspectsView() {
-  if (!showPausedProspectsOnly) return;
+function toggleTouchedProspectsView() {
+  showTouchedProspectsOnly = !showTouchedProspectsOnly;
+  if (showTouchedProspectsOnly) showPausedProspectsOnly = false;
+  render();
+}
+
+function clearProspectsSubsetView() {
+  if (!showPausedProspectsOnly && !showTouchedProspectsOnly) return;
   showPausedProspectsOnly = false;
+  showTouchedProspectsOnly = false;
   render();
 }
 
@@ -2235,6 +2244,9 @@ function renderBoard() {
   const visibleDeals = getFilteredDeals();
   if (!visibleDeals.some((d) => isDealPaused(d))) {
     showPausedProspectsOnly = false;
+  }
+  if (!visibleDeals.some((d) => !isDealPaused(d) && isDealTouched(d))) {
+    showTouchedProspectsOnly = false;
   }
   for (const stage of STAGES) {
     boardEl.appendChild(renderColumn(stage, visibleDeals));
@@ -2699,20 +2711,28 @@ function shiftPipelinePeriod(direction) {
 
 function renderColumn(stage, visibleDeals) {
   // Paused deals always belong under Prospects, even if stage drifted.
-  const activeDeals = visibleDeals
+  const liveDeals = visibleDeals
     .filter((d) => d.stage === stage.id && !isDealPaused(d))
     .sort(compareColumnOrder);
+  const touchedDeals =
+    stage.id === "prospects" ? liveDeals.filter((d) => isDealTouched(d)) : [];
+  const activeDeals =
+    stage.id === "prospects" ? liveDeals.filter((d) => !isDealTouched(d)) : liveDeals;
   const pausedDeals =
     stage.id === "prospects"
       ? visibleDeals.filter((d) => isDealPaused(d)).sort(compareColumnOrder)
       : [];
   const pausedView =
     stage.id === "prospects" && showPausedProspectsOnly && pausedDeals.length > 0;
-  const shownDeals = pausedView ? pausedDeals : activeDeals;
+  const touchedView =
+    stage.id === "prospects" && showTouchedProspectsOnly && touchedDeals.length > 0;
+  const subsetView = pausedView || touchedView;
+  const shownDeals = pausedView ? pausedDeals : touchedView ? touchedDeals : activeDeals;
   const activeTotal = activeDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+  const touchedTotal = touchedDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
   const pausedTotal = pausedDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
-  const includingPausedTotal = activeTotal + pausedTotal;
-  const total = pausedView ? pausedTotal : activeTotal;
+  const includingPausedTotal = activeTotal + touchedTotal + pausedTotal;
+  const total = pausedView ? pausedTotal : touchedView ? touchedTotal : activeTotal;
   const filtersActive = hasActiveFilters();
 
   const col = document.createElement("section");
@@ -2728,47 +2748,24 @@ function renderColumn(stage, visibleDeals) {
   const title = document.createElement("h2");
   title.className = "column-title";
   title.textContent = stage.label;
-  if (stage.id === "prospects" && pausedView) {
-    title.classList.add("is-muted");
-    title.title = "Show active prospects";
-    title.style.cursor = "pointer";
-    title.addEventListener("click", clearPausedProspectsView);
-  }
 
   const count = document.createElement("span");
   count.className = "column-count";
   count.textContent = activeDeals.length;
-  if (stage.id === "prospects" && pausedView) {
-    count.classList.add("is-muted");
-    count.title = "Show active prospects";
-    count.style.cursor = "pointer";
-    count.addEventListener("click", clearPausedProspectsView);
-  }
 
   titleGroup.append(title, count);
   header.appendChild(titleGroup);
 
   const canCreateInStage = stage.id === "prospects" || stage.id === "interested";
+  const hasProspectSubsets =
+    stage.id === "prospects" && (touchedDeals.length > 0 || pausedDeals.length > 0);
 
-  if (stage.id === "prospects" && pausedDeals.length > 0) {
-    const pausedToggle = document.createElement("button");
-    pausedToggle.type = "button";
-    pausedToggle.className = "column-paused-toggle";
-    if (pausedView) pausedToggle.classList.add("is-active");
-    pausedToggle.title = pausedView ? "Show active prospects" : "Show paused deals only";
-    pausedToggle.setAttribute("aria-pressed", pausedView ? "true" : "false");
-
-    const pausedLabel = document.createElement("span");
-    pausedLabel.className = "column-paused-label";
-    pausedLabel.textContent = "Paused";
-
-    const pausedCount = document.createElement("span");
-    pausedCount.className = "column-count column-paused-count";
-    pausedCount.textContent = pausedDeals.length;
-
-    pausedToggle.append(pausedLabel, pausedCount);
-    pausedToggle.addEventListener("click", togglePausedProspectsView);
-    header.appendChild(pausedToggle);
+  if (hasProspectSubsets) {
+    header.classList.add("has-subsets");
+    titleGroup.classList.add("column-view-toggle");
+    titleGroup.title = "Show untouched prospects";
+    titleGroup.addEventListener("click", clearProspectsSubsetView);
+    if (!subsetView) titleGroup.classList.add("is-active");
   }
 
   if (canCreateInStage) {
@@ -2778,6 +2775,55 @@ function renderColumn(stage, visibleDeals) {
     addBtn.textContent = "+";
     addBtn.addEventListener("click", () => openModal({ stage: stage.id }));
     header.appendChild(addBtn);
+  }
+
+  if (hasProspectSubsets) {
+    const subsets = document.createElement("div");
+    subsets.className = "column-subsets";
+
+    if (touchedDeals.length > 0) {
+      const touchedToggle = document.createElement("button");
+      touchedToggle.type = "button";
+      touchedToggle.className = "column-touched-toggle";
+      if (touchedView) touchedToggle.classList.add("is-active");
+      touchedToggle.title = touchedView ? "Show untouched prospects" : "Show touched deals only";
+      touchedToggle.setAttribute("aria-pressed", touchedView ? "true" : "false");
+
+      const touchedLabel = document.createElement("span");
+      touchedLabel.className = "column-touched-label";
+      touchedLabel.textContent = "Touched";
+
+      const touchedCount = document.createElement("span");
+      touchedCount.className = "column-count column-touched-count";
+      touchedCount.textContent = touchedDeals.length;
+
+      touchedToggle.append(touchedLabel, touchedCount);
+      touchedToggle.addEventListener("click", toggleTouchedProspectsView);
+      subsets.appendChild(touchedToggle);
+    }
+
+    if (pausedDeals.length > 0) {
+      const pausedToggle = document.createElement("button");
+      pausedToggle.type = "button";
+      pausedToggle.className = "column-paused-toggle";
+      if (pausedView) pausedToggle.classList.add("is-active");
+      pausedToggle.title = pausedView ? "Show untouched prospects" : "Show paused deals only";
+      pausedToggle.setAttribute("aria-pressed", pausedView ? "true" : "false");
+
+      const pausedLabel = document.createElement("span");
+      pausedLabel.className = "column-paused-label";
+      pausedLabel.textContent = "Paused";
+
+      const pausedCount = document.createElement("span");
+      pausedCount.className = "column-count column-paused-count";
+      pausedCount.textContent = pausedDeals.length;
+
+      pausedToggle.append(pausedLabel, pausedCount);
+      pausedToggle.addEventListener("click", togglePausedProspectsView);
+      subsets.appendChild(pausedToggle);
+    }
+
+    header.appendChild(subsets);
   }
 
   const body = document.createElement("div");
@@ -2791,6 +2837,8 @@ function renderColumn(stage, visibleDeals) {
     hint.className = "empty-hint";
     if (pausedView) {
       hint.textContent = "No paused deals";
+    } else if (touchedView) {
+      hint.textContent = "No touched deals";
     } else {
       hint.textContent = (filtersActive || searchQuery) ? "No matching deals" : "Drop deals here";
     }
@@ -3241,6 +3289,10 @@ function firstTouchAt(deal) {
     if (earliest == null || at < earliest) earliest = at;
   }
   return earliest;
+}
+
+function isDealTouched(deal) {
+  return firstTouchAt(deal) != null;
 }
 
 function monthIndex(date) {

@@ -860,14 +860,45 @@ main {
   overflow: hidden;
 }
 
+.column-header.has-subsets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  height: auto;
+  padding: 10px 14px 8px;
+  gap: 8px 10px;
+  overflow: visible;
+}
+
 .column-heading,
-.column-paused-toggle {
+.column-paused-toggle,
+.column-touched-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
 .column-heading {
+  min-width: 0;
+}
+
+.column-header.has-subsets .column-heading {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.column-header.has-subsets .column-add {
+  grid-column: 2;
+  grid-row: 1;
+  margin-left: 0;
+}
+
+.column-subsets {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 14px;
   min-width: 0;
 }
 
@@ -880,9 +911,9 @@ main {
   margin: 0;
 }
 
-.column-title.is-muted,
-.column-count.is-muted {
-  opacity: 0.55;
+.column-view-toggle {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
 }
 
 .column-count {
@@ -896,32 +927,32 @@ main {
   padding: 2px 8px;
 }
 
-.column-paused-toggle {
+.column-heading.is-active .column-title {
+  color: var(--accent);
+}
+
+.column-heading.is-active .column-count,
+.column-touched-toggle.is-active .column-count,
+.column-paused-toggle.is-active .column-count {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+
+.column-paused-toggle,
+.column-touched-toggle {
   appearance: none;
   border: none;
   background: transparent;
   padding: 0;
-  margin: 0 0 0 2px;
+  margin: 0;
   cursor: pointer;
   color: inherit;
   border-radius: 999px;
 }
 
-.column-paused-toggle:hover .column-paused-label {
-  color: var(--ink-soft);
-}
-
-.column-paused-toggle.is-active .column-paused-label {
-  color: var(--ink);
-}
-
-.column-paused-toggle.is-active .column-paused-count {
-  color: var(--ink);
-  border-color: #cfccbf;
-  background: var(--surface);
-}
-
-.column-paused-label {
+.column-paused-label,
+.column-touched-label {
   font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
@@ -930,7 +961,18 @@ main {
   letter-spacing: 0.01em;
 }
 
-.column-paused-count {
+.column-paused-toggle:hover .column-paused-label,
+.column-touched-toggle:hover .column-touched-label {
+  color: var(--ink-soft);
+}
+
+.column-paused-toggle.is-active .column-paused-label,
+.column-touched-toggle.is-active .column-touched-label {
+  color: var(--accent);
+}
+
+.column-paused-count,
+.column-touched-count {
   font-weight: 500;
 }
 
