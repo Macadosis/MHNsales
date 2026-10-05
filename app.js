@@ -3016,10 +3016,7 @@ function renderCard(deal) {
 
 const DISMISSED_STAGE = { id: "dismissed", label: "Dismissed" };
 
-/* Approximate success rate: deals that said yes over every deal that reached a
-   decision. Failed deals are excluded — they never got a yes or a no. */
-const SUCCESS_WON_STAGES = ["committed", "paid"];
-const SUCCESS_CONSIDERED_STAGES = ["prospects", "interested", "dismissed", "committed", "paid"];
+const DASH_OUTCOME_STAGES = STAGES.filter((stage) => stage.id !== "prospects");
 
 function sumDealValue(list) {
   return list.reduce((sum, deal) => sum + (Number(deal.value) || 0), 0);
@@ -3036,30 +3033,31 @@ function formatShare(part, total) {
   return `${Math.round(pct)}%`;
 }
 
+function touchedDealsInStages(deals, stageIds) {
+  const ids = new Set(stageIds);
+  return deals.filter((deal) => ids.has(deal.stage) && isDealTouched(deal));
+}
+
+function stageMetric(id, label, deals) {
+  return { id, label, count: deals.length, value: sumDealValue(deals) };
+}
+
 function getDashboardStats() {
   const active = getFilteredDeals();
   const dismissedDeals = getDismissedDealsMatchingFilters();
-
-  const stages = [...STAGES, DISMISSED_STAGE].map(({ id, label }) => {
-    const stageDeals =
-      id === DISMISSED_STAGE.id ? dismissedDeals : active.filter((deal) => deal.stage === id);
-    return { id, label, count: stageDeals.length, value: sumDealValue(stageDeals) };
-  });
-
-  const countByStage = new Map(stages.map((stage) => [stage.id, stage.count]));
-  const sumStages = (ids) => ids.reduce((sum, id) => sum + (countByStage.get(id) || 0), 0);
-
-  const won = sumStages(SUCCESS_WON_STAGES);
-  const considered = sumStages(SUCCESS_CONSIDERED_STAGES);
+  const touchedDeals = [...active, ...dismissedDeals].filter(isDealTouched);
+  const untouchedProspects = active.filter((deal) => deal.stage === "prospects" && !isDealTouched(deal));
 
   return {
-    activeStages: stages.filter((stage) => stage.id !== DISMISSED_STAGE.id),
-    dismissed: stages.find((stage) => stage.id === DISMISSED_STAGE.id),
     activeCount: active.length,
-    activeValue: sumDealValue(active),
-    won,
-    considered,
-    successRate: considered ? (won / considered) * 100 : null,
+    totalCount: active.length + dismissedDeals.length,
+    touchedCount: touchedDeals.length,
+    touchedValue: sumDealValue(touchedDeals),
+    outcomeStages: DASH_OUTCOME_STAGES.map(({ id, label }) =>
+      stageMetric(id, label, touchedDealsInStages(active, [id]))
+    ),
+    untouchedProspects: stageMetric("prospects", "Untouched prospects", untouchedProspects),
+    dismissed: stageMetric(DISMISSED_STAGE.id, DISMISSED_STAGE.label, dismissedDeals),
   };
 }
 
@@ -3104,11 +3102,24 @@ function renderDashboard() {
 
   const stack = dashEl("div", "dashboard-stack");
   const grid = dashEl("div", "dashboard-grid");
-  grid.append(
-    renderDashActiveCard(stats),
-    renderDashDismissedCard(stats, totalCards),
-    renderDashSuccessCard(stats)
+  const side = dashEl("div", "dashboard-side");
+  side.append(
+    renderDashCountCard({
+      modifier: "dash-card-untouched",
+      stageId: "prospects",
+      title: "Untouched prospects",
+      metric: stats.untouchedProspects,
+      totalCards,
+    }),
+    renderDashCountCard({
+      modifier: "dash-card-dismissed",
+      stageId: DISMISSED_STAGE.id,
+      title: "Dismissed deals",
+      metric: stats.dismissed,
+      totalCards,
+    })
   );
+  grid.append(renderDashActiveCard(stats), side);
   stack.append(renderDashTrendCard(), grid);
   dashboardBodyEl.appendChild(stack);
   layoutDashTrend();
@@ -3134,35 +3145,50 @@ function renderDashActiveCard(stats) {
 
   const head = dashEl("header", "dash-card-head");
   head.append(
-    dashEl("h2", "dash-label", "Active deal cards"),
-    dashEl("span", "dash-card-note", fmtEuro.format(stats.activeValue))
+    dashEl("h2", "dash-label", "Touched deals"),
+    dashEl("span", "dash-card-note", fmtEuro.format(stats.touchedValue))
   );
 
-  card.append(head, dashFigure(stats.activeCount), renderDashStageBar(stats));
+  card.append(head, renderDashTouchedFigure(stats), renderDashStageBar(stats));
 
   const list = dashEl("ul", "dash-stage-list");
-  for (const stage of stats.activeStages) {
-    list.appendChild(renderDashStageRow(stage, stats.activeCount));
+  for (const stage of stats.outcomeStages) {
+    list.appendChild(renderDashStageRow(stage, stats.touchedCount));
   }
   card.appendChild(list);
 
   return card;
 }
 
+function renderDashTouchedFigure(stats) {
+  const figure = dashEl("div", "dash-figure");
+  const share = formatShare(stats.touchedCount, stats.totalCount);
+  const caption = `${share} of all ${stats.totalCount} deal cards ever created`;
+  figure.title = `${stats.touchedCount} touched, ${caption}`;
+  figure.append(
+    dashEl("span", "dash-figure-value", String(stats.touchedCount)),
+    dashEl("span", "dash-figure-unit", `(${caption})`)
+  );
+  return figure;
+}
+
 function renderDashStageBar(stats) {
   const bar = dashEl("div", "dash-bar");
+  const total = stats.touchedCount;
   bar.setAttribute("role", "img");
   bar.setAttribute(
     "aria-label",
-    stats.activeStages.map((stage) => `${stage.label}: ${stage.count}`).join(", ")
+    stats.outcomeStages
+      .map((stage) => `${stage.label}: ${stage.count} of ${total} touched`)
+      .join(", ")
   );
 
-  for (const stage of stats.activeStages) {
-    if (!stage.count) continue;
+  for (const stage of stats.outcomeStages) {
+    if (!stage.count || !total) continue;
     const segment = dashEl("span", "dash-bar-seg");
     segment.dataset.stage = stage.id;
-    segment.style.flexGrow = String(stage.count);
-    segment.title = `${stage.label} — ${stage.count} (${formatShare(stage.count, stats.activeCount)})`;
+    segment.style.flex = `0 0 ${(stage.count / total) * 100}%`;
+    segment.title = `${stage.label} — ${stage.count} of ${total} touched (${formatShare(stage.count, total)})`;
     bar.appendChild(segment);
   }
 
@@ -3190,65 +3216,29 @@ function renderDashStageRow(stage, total) {
   return item;
 }
 
-function renderDashDismissedCard(stats, totalCards) {
-  const card = dashCard("dash-card-dismissed");
-  card.dataset.stage = DISMISSED_STAGE.id;
+function renderDashCountCard({ modifier, stageId, title, metric, totalCards }) {
+  const card = dashCard(modifier);
+  card.dataset.stage = stageId;
 
   const head = dashEl("header", "dash-card-head");
   head.append(
-    dashEl("h2", "dash-label", "Dismissed deals"),
-    dashEl("span", "dash-card-note", fmtEuro.format(stats.dismissed.value))
+    dashEl("h2", "dash-label", title),
+    dashEl("span", "dash-card-note", fmtEuro.format(metric.value))
   );
 
   const track = dashEl("div", "dash-stage-track");
   const fill = dashEl("span", "dash-stage-fill");
-  fill.style.width = `${(stats.dismissed.count / totalCards) * 100}%`;
+  fill.style.width = totalCards ? `${(metric.count / totalCards) * 100}%` : "0%";
   track.appendChild(fill);
 
   card.append(
     head,
-    dashFigure(stats.dismissed.count),
+    dashFigure(metric.count),
     track,
     dashEl(
       "p",
       "dash-note",
-      `${formatShare(stats.dismissed.count, totalCards)} of all ${totalCards} deal cards ever created.`
-    )
-  );
-  return card;
-}
-
-function renderDashSuccessCard(stats) {
-  const card = dashCard("dash-card-success");
-
-  const head = dashEl("header", "dash-card-head");
-  head.append(dashEl("h2", "dash-label", "Approx. success rate"));
-
-  const donut = dashEl("div", "dash-donut");
-  donut.style.setProperty("--pct", String(stats.successRate ?? 0));
-  donut.append(
-    dashEl(
-      "span",
-      "dash-donut-value",
-      stats.successRate === null ? "—" : formatShare(stats.won, stats.considered)
-    )
-  );
-
-  const donutWrap = dashEl("div", "dash-donut-wrap");
-  const legend = dashEl("div", "dash-donut-legend");
-  legend.append(
-    dashEl("span", "dash-donut-won", `${stats.won} won`),
-    dashEl("span", "dash-donut-total", `of ${stats.considered} decided`)
-  );
-  donutWrap.append(donut, legend);
-
-  card.append(
-    head,
-    donutWrap,
-    dashEl(
-      "p",
-      "dash-note",
-      "Won = Committed + Paid. Decided = Prospects + Interested + Dismissed + Committed + Paid. Failed deals are left out."
+      `${formatShare(metric.count, totalCards)} of all ${totalCards} deal cards ever created.`
     )
   );
   return card;

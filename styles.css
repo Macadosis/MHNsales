@@ -1817,9 +1817,16 @@ body.is-card-dragging .card {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(168px, 0.78fr) minmax(196px, 0.92fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(240px, 0.72fr);
   gap: 12px;
   align-items: start;
+}
+
+.dashboard-side {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
 }
 
 .dash-card {
@@ -1858,6 +1865,7 @@ body.is-card-dragging .card {
 .dash-figure {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1990,67 +1998,11 @@ body.is-card-dragging .card {
 .dashboard-body [data-stage="failed"] { --stage-color: var(--stage-failed); }
 .dashboard-body [data-stage="dismissed"] { --stage-color: var(--stage-dismissed); }
 
-/* Dismissed + success rate cards */
+/* Untouched prospects + dismissed cards */
 
+.dash-card-untouched .dash-stage-track,
 .dash-card-dismissed .dash-stage-track {
   margin-top: 8px;
-}
-
-.dash-donut-wrap {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 8px;
-}
-
-.dash-donut {
-  --pct: 0;
-  position: relative;
-  width: 72px;
-  height: 72px;
-  flex: none;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: conic-gradient(
-    var(--stage-committed) calc(var(--pct) * 1%),
-    var(--bg-sunken) 0
-  );
-}
-
-.dash-donut::before {
-  content: "";
-  position: absolute;
-  inset: 9px;
-  border-radius: 50%;
-  background: var(--surface);
-}
-
-.dash-donut-value {
-  position: relative;
-  font-family: var(--font-serif);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.dash-donut-legend {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.dash-donut-won {
-  font-family: var(--font-serif);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--stage-paid);
-}
-
-.dash-donut-total {
-  font-size: 12.5px;
-  color: var(--ink-faint);
 }
 
 .dashboard-stack {
@@ -2245,11 +2197,7 @@ body.is-card-dragging .card {
 
 @media (max-width: 1100px) {
   .dashboard-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .dash-card-hero {
-    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -2262,10 +2210,6 @@ body.is-card-dragging .card {
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
-  }
-
-  .dash-card-hero {
-    grid-column: auto;
   }
 
   .dash-card {
@@ -2284,15 +2228,6 @@ body.is-card-dragging .card {
   .dash-stage-label {
     width: auto;
     flex: 1;
-  }
-
-  .dash-donut {
-    width: 64px;
-    height: 64px;
-  }
-
-  .dash-donut::before {
-    inset: 8px;
   }
 }
 
