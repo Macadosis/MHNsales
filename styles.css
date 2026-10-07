@@ -2500,6 +2500,38 @@ body.is-card-dragging .card {
   min-width: 720px;
 }
 
+.tasks-pipeline-weekend {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(138, 135, 126, 0.22);
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tasks-pipeline-weekend.continues-start {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.tasks-pipeline-weekend.continues-end {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.tasks-pipeline-weekend.is-grid {
+  top: 0;
+  bottom: 0;
+  background: rgba(138, 135, 126, 0.08);
+  border-radius: 0;
+}
+
+.tasks-pipeline-weekend.is-grid.continues-start,
+.tasks-pipeline-weekend.is-grid.continues-end {
+  border-radius: 0;
+}
+
 .tasks-pipeline-scale-tick {
   position: absolute;
   top: 0;
@@ -2511,6 +2543,7 @@ body.is-card-dragging .card {
   white-space: nowrap;
   pointer-events: none;
   transform: translateX(-50%);
+  z-index: 1;
 }
 
 .tasks-pipeline-scale-day {

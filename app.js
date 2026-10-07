@@ -4879,10 +4879,76 @@ function startOfISOWeek(date) {
   return addDays(d, offset);
 }
 
+function forEachVisibleWeekend(periodStart, periodEnd, fn) {
+  let cursor = startOfDay(new Date(periodStart));
+  const day = cursor.getDay();
+  if (day === 0) cursor = addDays(cursor, -1);
+  else if (day !== 6) cursor = addDays(cursor, 6 - day);
+
+  while (cursor.getTime() < periodEnd) {
+    const sat = cursor.getTime();
+    const sun = addDays(cursor, 1).getTime();
+    const mon = addDays(cursor, 2).getTime();
+    if (mon > periodStart && sat < periodEnd) {
+      fn({
+        sat,
+        sun,
+        mon,
+        continuesStart: sat < periodStart,
+        continuesEnd: mon > periodEnd,
+      });
+    }
+    cursor = addDays(cursor, 7);
+  }
+}
+
+function appendTasksPipelineWeekends(container, periodStart, periodEnd, span, extraClass) {
+  if (!container || tasksPipelineState.periodMonths >= 12) return;
+  // Day numbers sit on the day-start tick. Wrap Sat+Sun labels, not Sat→Mon.
+  const tickPad = 0.42 * MS_DAY;
+  forEachVisibleWeekend(periodStart, periodEnd, (weekend) => {
+    const bandStart = weekend.sat - tickPad;
+    const bandEnd = weekend.sun + tickPad;
+    const continuesStart = weekend.continuesStart;
+    const continuesEnd = weekend.continuesEnd;
+    const visibleStart = continuesStart ? periodStart : Math.max(bandStart, periodStart);
+    const visibleEnd = continuesEnd ? periodEnd : Math.min(bandEnd, periodEnd);
+    if (visibleEnd <= visibleStart) return;
+
+    const el = document.createElement("div");
+    el.className = extraClass
+      ? `tasks-pipeline-weekend ${extraClass}`
+      : "tasks-pipeline-weekend";
+    el.setAttribute("aria-hidden", "true");
+    if (continuesStart) el.classList.add("continues-start");
+    if (continuesEnd) el.classList.add("continues-end");
+
+    const left = ((visibleStart - periodStart) / span) * 100;
+    const width = ((visibleEnd - visibleStart) / span) * 100;
+    if (continuesStart && continuesEnd) {
+      el.style.left = "0";
+      el.style.right = "0";
+      el.style.width = "auto";
+    } else if (continuesEnd) {
+      el.style.left = `${left}%`;
+      el.style.right = "0";
+      el.style.width = "auto";
+    } else if (continuesStart) {
+      el.style.left = "0";
+      el.style.width = `${left + width}%`;
+    } else {
+      el.style.left = `${left}%`;
+      el.style.width = `${width}%`;
+    }
+    container.appendChild(el);
+  });
+}
+
 function renderTasksPipelineScale(periodStart, periodEnd, span) {
   const scale = document.createElement("div");
   scale.className = "tasks-pipeline-axis-scale";
   scale.setAttribute("aria-hidden", "true");
+  appendTasksPipelineWeekends(scale, periodStart, periodEnd, span);
 
   if (tasksPipelineState.periodMonths <= 1) {
     // Day markers for the one-month view.
@@ -5275,6 +5341,14 @@ function showTasksPipelineTooltip(bar, deal, task) {
     typeRow.appendChild(typeVal);
     tip.append(typeRow);
   }
+
+  const contactRow = document.createElement("div");
+  contactRow.className = "tasks-pipeline-tooltip-row";
+  contactRow.innerHTML = `<span class="tasks-pipeline-tooltip-label">Contact</span>`;
+  const contactVal = document.createElement("span");
+  contactVal.textContent = (deal.contact || "").trim() || "—";
+  contactRow.appendChild(contactVal);
+  tip.append(contactRow);
   tip.hidden = false;
 
   const rect = bar.getBoundingClientRect();
@@ -5375,6 +5449,13 @@ function renderTasksPipeline(entries) {
   else tasksPipelineAxisEl.append(monthsRow);
 
   tasksPipelineRowsEl.innerHTML = "";
+  appendTasksPipelineWeekends(
+    tasksPipelineRowsEl,
+    periodStart,
+    periodEnd,
+    span,
+    "is-grid"
+  );
   const rowWidthPx = Math.max(
     tasksPipelineLayout?.clientWidth || tasksPipelineRowsEl.clientWidth || 720,
     720
